@@ -20,6 +20,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/customers/customers.routes').then((m) => m.CUSTOMERS_ROUTES),
       },
+      {
+        path: 'quotations',
+        data: { breadcrumb: 'Cotizaciones', roles: MODULE_ROLES.quotations },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/quotations/quotations.routes').then((m) => m.QUOTATIONS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

@@ -1,0 +1,133 @@
+@if (loading() && !q()) {
+  <p-skeleton height="4rem" styleClass="mb-3" />
+  <p-skeleton height="24rem" />
+} @else if (q(); as q) {
+  <app-page-header [title]="'Cotización ' + q.number" [subtitle]="q.title" backLink="/quotations" backLabel="Cotizaciones">
+    <div meta class="row" style="margin-top: 0.5rem">
+      <app-status-tag [value]="q.status" [labels]="labels" [severities]="severities" />
+      @if (q.status === 'ENVIADA' && expiresIn() !== null) {
+        <span class="small" [class.text-danger]="expiresIn()! < 3" [class.muted]="expiresIn()! >= 3">
+          {{ expiresIn()! >= 0 ? 'Vence en ' + expiresIn() + ' día(s)' : 'Vencida' }}
+        </span>
+      }
+    </div>
+    @if (q.order) {
+      <p-button [label]="'Ver pedido ' + q.order.number" icon="pi pi-briefcase" severity="success" [routerLink]="['/orders', q.order.id]" />
+    }
+    @if (canConvert()) {
+      <p-button label="Convertir en pedido" icon="pi pi-arrow-right" severity="success" [loading]="busy()" (onClick)="openConvert()" />
+    }
+    @if (canApprove()) {
+      <p-button label="Aprobar" icon="pi pi-check" severity="success" [outlined]="true" [loading]="busy()" (onClick)="approve()" />
+    }
+    @if (editable()) {
+      <p-button label="Editar" icon="pi pi-pencil" severity="secondary" [outlined]="true" [routerLink]="['/quotations', q.id, 'edit']" />
+    }
+    <p-button label="PDF" icon="pi pi-file-pdf" severity="secondary" [outlined]="true" (onClick)="downloadPdf()" />
+    <p-button icon="pi pi-ellipsis-v" severity="secondary" [outlined]="true" ariaLabel="Más acciones" (onClick)="menu.toggle($event)" />
+    <p-menu #menu [model]="menuItems()" [popup]="true" appendTo="body" />
+  </app-page-header>
+
+  <div class="grid-cols" style="margin-bottom: 1rem">
+    <section class="card">
+      <h2 class="card__title">Cliente</h2>
+      <dl class="dl">
+        <dt>Nombre</dt>
+        <dd><a class="link" [routerLink]="['/customers', q.customer?.id]">{{ q.customer?.full_name }}</a></dd>
+        <dt>Documento</dt>
+        <dd>{{ q.customer?.document_number ? q.customer?.document_type + ' ' + q.customer?.document_number : '—' }}</dd>
+        <dt>Teléfono</dt>
+        <dd>{{ q.customer?.phone || '—' }}</dd>
+        <dt>Correo</dt>
+        <dd>{{ q.customer?.email || '—' }}</dd>
+      </dl>
+    </section>
+    <section class="card">
+      <h2 class="card__title">Trabajo</h2>
+      <dl class="dl">
+        <dt>Servicio</dt>
+        <dd>{{ q.service_type?.name }}</dd>
+        <dt>Fecha / vence</dt>
+        <dd>{{ q.issue_date | date: 'dd/MM/yyyy' }} → {{ q.expiry_date | date: 'dd/MM/yyyy' }}</dd>
+        <dt>Material</dt>
+        <dd>{{ q.main_material || '—' }}{{ q.estimated_weight ? ' · ' + q.estimated_weight + ' g' : '' }}</dd>
+        <dt>Piedra / talla</dt>
+        <dd>{{ q.stone || '—' }} / {{ q.size || '—' }}</dd>
+        @if (q.approved_at) {
+          <dt>Aprobada</dt>
+          <dd>{{ q.approved_at | date: 'dd/MM/yyyy HH:mm' }}</dd>
+        }
+      </dl>
+    </section>
+  </div>
+
+  <section class="card">
+    <h2 class="card__title">Detalle</h2>
+    <p-table [value]="q.items" [scrollable]="true" [tableStyle]="{ 'min-width': '760px' }">
+      <ng-template #header>
+        <tr>
+          <th>#</th><th>Producto / servicio</th><th>Material</th><th class="text-right">Cantidad</th>
+          <th class="text-right">Precio</th><th class="text-right">Descuento</th><th class="text-right">Subtotal</th>
+        </tr>
+      </ng-template>
+      <ng-template #body let-it let-i="rowIndex">
+        <tr>
+          <td>{{ i + 1 }}</td>
+          <td>
+            <div class="strong">{{ it.description }}</div>
+            @if (it.detail) {
+              <small class="muted">{{ it.detail }}</small>
+            }
+          </td>
+          <td>{{ it.material_name || '—' }}</td>
+          <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
+          <td class="text-right mono nowrap">{{ it.unit_price | money }}</td>
+          <td class="text-right mono nowrap">{{ it.discount > 0 ? (it.discount | money) : '—' }}</td>
+          <td class="text-right mono nowrap strong">{{ it.subtotal | money }}</td>
+        </tr>
+      </ng-template>
+    </p-table>
+    <div class="grid-cols" style="margin-top: 1rem; align-items: start">
+      <div class="stack">
+        @if (q.notes) {
+          <div><h3 class="section-title" style="margin-top: 0">Observaciones</h3><p style="white-space: pre-line; margin: 0">{{ q.notes }}</p></div>
+        }
+        @if (q.terms) {
+          <div><h3 class="section-title" style="margin-top: 0">Condiciones</h3><p style="white-space: pre-line; margin: 0">{{ q.terms }}</p></div>
+        }
+      </div>
+      <dl class="dl" style="max-width: 320px; margin-left: auto; width: 100%">
+        <dt>Subtotal</dt><dd class="text-right mono">{{ q.subtotal | money }}</dd>
+        <dt>Descuento</dt><dd class="text-right mono">- {{ q.discount_total | money }}</dd>
+        <dt>IGV ({{ q.tax_rate }}%)</dt><dd class="text-right mono">{{ q.tax_amount | money }}</dd>
+        <dt class="strong" style="color: var(--p-surface-900)">Total</dt><dd class="text-right mono" style="font-size: 1.15rem; font-weight: 700">{{ q.total | money }}</dd>
+      </dl>
+    </div>
+  </section>
+
+  <p-dialog header="Convertir en pedido" [(visible)]="convertDialog" [modal]="true" [style]="{ width: '520px' }" [draggable]="false">
+    <p-message severity="info" text="El pedido heredará el cliente, los ítems, los precios y las observaciones de la cotización." styleClass="mb-3" />
+    <form [formGroup]="convertForm" (ngSubmit)="convert()" class="form-grid" style="margin-top: 1rem" novalidate>
+      <div class="field field--full">
+        <label for="assigned_to">Responsable</label>
+        <p-select inputId="assigned_to" [options]="lookups.activeStaff()" formControlName="assigned_to" optionLabel="full_name" optionValue="id" placeholder="Sin asignar" [showClear]="true" appendTo="body" />
+      </div>
+      <div class="field">
+        <label for="due_date">Fecha de entrega</label>
+        <p-datepicker inputId="due_date" formControlName="due_date" dateFormat="dd/mm/yy" [minDate]="minDate" [showIcon]="true" appendTo="body" [fluid]="true" />
+      </div>
+      <div class="field">
+        <label for="priority">Prioridad</label>
+        <p-select inputId="priority" [options]="priorities" formControlName="priority" optionLabel="label" optionValue="value" appendTo="body" />
+      </div>
+      <div class="field field--full row">
+        <p-checkbox inputId="create_stages" formControlName="create_stages" [binary]="true" />
+        <label for="create_stages">Generar etapas de producción desde la plantilla</label>
+      </div>
+      <div class="form-actions field--full" style="margin-top: 0.5rem">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="convertDialog.set(false)" />
+        <p-button type="submit" label="Crear pedido" icon="pi pi-check" [loading]="busy()" />
+      </div>
+    </form>
+  </p-dialog>
+}

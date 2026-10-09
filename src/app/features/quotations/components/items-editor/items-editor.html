@@ -1,0 +1,76 @@
+<div class="items">
+  <div class="items__head" aria-hidden="true">
+    <span>Producto / servicio</span>
+    <span>Material</span>
+    <span class="text-right">Cant.</span>
+    <span>Unidad</span>
+    <span class="text-right">Precio unit.</span>
+    <span class="text-right">Descuento</span>
+    <span class="text-right">Subtotal</span>
+    <span></span>
+  </div>
+
+  @for (group of items().controls; track group; let i = $index) {
+    <div class="items__row" [formGroup]="group">
+      <div class="items__cell items__cell--desc">
+        <label class="items__label" [for]="'desc' + i">Producto / servicio</label>
+        <input pInputText [id]="'desc' + i" formControlName="description" placeholder="Ej. Anillo solitario" />
+        <input pInputText formControlName="detail" placeholder="Descripción / detalle (opcional)" class="items__detail" />
+        <app-field-error [control]="group.controls.description" />
+      </div>
+      <div class="items__cell">
+        <label class="items__label">Material</label>
+        <p-select
+          [options]="materialOptions()"
+          formControlName="material_id"
+          optionLabel="label"
+          optionValue="value"
+          placeholder="—"
+          [showClear]="true"
+          [filter]="true"
+          filterBy="label"
+          appendTo="body"
+          (onChange)="onMaterialChange(group, $event.value)"
+          [fluid]="true"
+        />
+      </div>
+      <div class="items__cell">
+        <label class="items__label">Cantidad</label>
+        <p-inputnumber formControlName="quantity" [minFractionDigits]="0" [maxFractionDigits]="3" [min]="0" inputStyleClass="text-right" [fluid]="true" locale="es-PE" />
+        <app-field-error [control]="group.controls.quantity" />
+      </div>
+      <div class="items__cell">
+        <label class="items__label">Unidad</label>
+        <p-select [options]="units" formControlName="unit" optionLabel="label" optionValue="value" appendTo="body" [fluid]="true" />
+      </div>
+      <div class="items__cell">
+        <label class="items__label">Precio unitario</label>
+        <p-inputnumber formControlName="unit_price" mode="currency" currency="PEN" locale="es-PE" [min]="0" inputStyleClass="text-right" [fluid]="true" />
+        <app-field-error [control]="group.controls.unit_price" />
+      </div>
+      <div class="items__cell">
+        <label class="items__label">Descuento</label>
+        <p-inputnumber formControlName="discount" mode="currency" currency="PEN" locale="es-PE" [min]="0" inputStyleClass="text-right" [fluid]="true" />
+        @if (group.errors?.['discount']; as msg) {
+          <small class="text-danger small">{{ msg }}</small>
+        }
+      </div>
+      <div class="items__cell items__subtotal">
+        <label class="items__label">Subtotal</label>
+        <span class="mono strong">{{ lineTotal(group) | money }}</span>
+      </div>
+      <div class="items__cell items__actions">
+        <p-button icon="pi pi-trash" severity="danger" [text]="true" ariaLabel="Quitar ítem" (onClick)="remove(i)" />
+      </div>
+    </div>
+  }
+
+  <p-button label="Agregar ítem" icon="pi pi-plus" [text]="true" (onClick)="add()" />
+
+  <div class="totals">
+    <div><span>Subtotal</span><span class="mono">{{ totals().subtotal | money }}</span></div>
+    <div><span>Descuento</span><span class="mono">- {{ totals().discount | money }}</span></div>
+    <div><span>IGV ({{ taxRate() }}%)</span><span class="mono">{{ totals().tax | money }}</span></div>
+    <div class="totals__total"><span>Total</span><span class="mono">{{ totals().total | money }}</span></div>
+  </div>
+</div>

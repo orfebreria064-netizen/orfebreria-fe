@@ -1,0 +1,89 @@
+<app-page-header
+  [title]="id() ? 'Editar cotización ' + (number() ?? '') : 'Nueva cotización'"
+  subtitle="El número correlativo se asigna automáticamente al guardar"
+  [backLink]="id() ? ['/quotations', id()] : '/quotations'"
+/>
+
+@if (loading()) {
+  <p-skeleton height="14rem" styleClass="mb-3" />
+  <p-skeleton height="16rem" />
+} @else {
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate class="stack">
+    <section class="card">
+      <h2 class="card__title">Cabecera</h2>
+      <div class="form-grid form-grid--3">
+        <div class="field field--span-2">
+          <label for="customer">Cliente <span class="req">*</span></label>
+          <app-customer-picker inputId="customer" formControlName="customer_id" />
+          <app-field-error [control]="form.controls.customer_id" />
+        </div>
+        <div class="field">
+          <label for="service_type">Tipo de servicio <span class="req">*</span></label>
+          <p-select inputId="service_type" [options]="lookups.activeServiceTypes()" formControlName="service_type_id" optionLabel="name" optionValue="id" placeholder="Seleccione" />
+          <app-field-error [control]="form.controls.service_type_id" />
+        </div>
+        <div class="field field--span-2">
+          <label for="title">Trabajo / producto principal <span class="req">*</span></label>
+          <input pInputText id="title" formControlName="title" placeholder="Ej. Anillo de compromiso en oro 18K" />
+          <app-field-error [control]="form.controls.title" />
+        </div>
+        <div class="field">
+          <label for="issue_date">Fecha <span class="req">*</span></label>
+          <p-datepicker inputId="issue_date" formControlName="issue_date" dateFormat="dd/mm/yy" [showIcon]="true" appendTo="body" [fluid]="true" />
+          <app-field-error [control]="form.controls.issue_date" />
+        </div>
+        <div class="field">
+          <label for="main_material">Material principal</label>
+          <input pInputText id="main_material" formControlName="main_material" placeholder="Ej. Oro 18K" />
+        </div>
+        <div class="field">
+          <label for="estimated_weight">Peso estimado (g)</label>
+          <p-inputnumber inputId="estimated_weight" formControlName="estimated_weight" [minFractionDigits]="2" [maxFractionDigits]="2" suffix=" g" locale="es-PE" [fluid]="true" />
+          <app-field-error [control]="form.controls.estimated_weight" />
+        </div>
+        <div class="field">
+          <label for="expiry_date">Vence <span class="req">*</span></label>
+          <p-datepicker inputId="expiry_date" formControlName="expiry_date" dateFormat="dd/mm/yy" [showIcon]="true" appendTo="body" [fluid]="true" />
+          <app-field-error [control]="form.controls.expiry_date" groupErrorKey="dateRange" />
+        </div>
+        <div class="field">
+          <label for="stone">Piedra</label>
+          <input pInputText id="stone" formControlName="stone" placeholder="Ej. Diamante 0.50 ct" />
+        </div>
+        <div class="field">
+          <label for="size">Talla / medida</label>
+          <input pInputText id="size" formControlName="size" placeholder="Ej. 18" />
+        </div>
+        <div class="field">
+          <label for="tax_rate">IGV (%)</label>
+          <p-inputnumber inputId="tax_rate" formControlName="tax_rate" [min]="0" [max]="100" suffix=" %" [fluid]="true" />
+          <app-field-error [control]="form.controls.tax_rate" />
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card__title">Detalle</h2>
+      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" />
+    </section>
+
+    <section class="card">
+      <div class="form-grid">
+        <div class="field">
+          <label for="notes">Observaciones</label>
+          <textarea pTextarea id="notes" formControlName="notes" rows="4" [autoResize]="true"></textarea>
+          <app-field-error [control]="form.controls.notes" />
+        </div>
+        <div class="field">
+          <label for="terms">Condiciones</label>
+          <textarea pTextarea id="terms" formControlName="terms" rows="4" [autoResize]="true"></textarea>
+          <app-field-error [control]="form.controls.terms" />
+        </div>
+      </div>
+      <div class="form-actions">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="cancel()" />
+        <p-button type="submit" [label]="id() ? 'Guardar cambios' : 'Guardar cotización'" icon="pi pi-check" [loading]="saving()" />
+      </div>
+    </section>
+  </form>
+}

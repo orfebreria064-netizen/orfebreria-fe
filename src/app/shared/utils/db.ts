@@ -52,7 +52,7 @@ export function todayIso(): string {
 }
 
 /** Normaliza strings vacíos a null antes de enviar a la base de datos. */
-export function emptyToNull<T extends Record<string, unknown>>(obj: T): T {
+export function emptyToNull<T extends object>(obj: T): T {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(obj)) out[k] = typeof v === 'string' && v.trim() === '' ? null : v;
   return out as T;
