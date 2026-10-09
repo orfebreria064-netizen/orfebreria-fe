@@ -50,6 +50,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/payments/payments.routes').then((m) => m.PAYMENTS_ROUTES),
       },
+      {
+        path: 'deliveries',
+        data: { breadcrumb: 'Entregas', roles: MODULE_ROLES.deliveries },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/deliveries/deliveries.routes').then((m) => m.DELIVERIES_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

@@ -21,6 +21,9 @@
     @if (canChangeStatus) {
       <p-button label="Cambiar estado" icon="pi pi-sync" severity="secondary" [outlined]="true" (onClick)="statusDialog.set(true)" class="hide-sm" />
     }
+    @if (canDeliver && o.status === 'LISTO_ENTREGA') {
+      <p-button label="Registrar entrega" icon="pi pi-truck" severity="success" (onClick)="openDelivery()" />
+    }
     @if (canSeeMoney && !locked()) {
       <p-button label="Registrar pago" icon="pi pi-wallet" (onClick)="openPayment()" />
     }
@@ -47,6 +50,16 @@
       <p-tabpanels>
         <p-tabpanel value="summary">
           <app-order-summary [order]="o" [stages]="stages()" [showMoney]="canSeeMoney" [advance]="advance()" (act)="onAction($event)" />
+          @if (canDeliver) {
+            <app-order-deliveries
+              [orderId]="o.id"
+              [deliveries]="deliveries()"
+              [canManage]="canDeliver"
+              [readonly]="locked()"
+              [readyToDeliver]="o.status === 'LISTO_ENTREGA'"
+              (changed)="load()"
+            />
+          }
         </p-tabpanel>
         <p-tabpanel value="production">
           <app-order-production [order]="o" [stages]="stages()" [locked]="locked()" (changed)="load()" />

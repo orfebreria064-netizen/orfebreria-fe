@@ -26,6 +26,9 @@ import { OrderMaterials } from '../../../materials/components/order-materials/or
 import { OrderPayments } from '../../../payments/components/order-payments/order-payments';
 import { Payment } from '../../../payments/models/payment.model';
 import { PaymentsService } from '../../../payments/services/payments.service';
+import { OrderDeliveries } from '../../../deliveries/components/order-deliveries/order-deliveries';
+import { Delivery } from '../../../deliveries/models/delivery.model';
+import { DeliveriesService } from '../../../deliveries/services/deliveries.service';
 
 type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 'history';
 
@@ -49,6 +52,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
     OrderProduction,
     OrderMaterials,
     OrderPayments,
+    OrderDeliveries,
   ],
   templateUrl: './order-detail.html',
   styleUrl: './order-detail.scss',
@@ -57,6 +61,7 @@ export class OrderDetailPage implements OnInit {
   private readonly service = inject(OrdersService);
   private readonly production = inject(ProductionService);
   private readonly paymentsService = inject(PaymentsService);
+  private readonly deliveriesService = inject(DeliveriesService);
   private readonly notify = inject(NotifyService);
   private readonly confirm = inject(ConfirmationService);
   private readonly router = inject(Router);
@@ -74,6 +79,7 @@ export class OrderDetailPage implements OnInit {
   protected readonly materialDialog = signal(false);
   protected readonly paymentDialog = signal(false);
   protected readonly payments = signal<Payment[]>([]);
+  protected readonly deliveries = signal<Delivery[]>([]);
   protected readonly advance = computed(() =>
     this.payments()
       .filter((p) => p.is_advance && !p.voided)
@@ -86,6 +92,7 @@ export class OrderDetailPage implements OnInit {
   protected readonly canEdit = this.auth.hasRole(...MODULE_ROLES.ordersWrite);
   protected readonly canChangeStatus = this.auth.hasRole(...MODULE_ROLES.ordersStatus);
   protected readonly canSeeMoney = this.auth.hasRole(...MODULE_ROLES.payments);
+  protected readonly canDeliver = this.auth.hasRole(...MODULE_ROLES.deliveries);
 
   protected readonly locked = computed(() => {
     const status = this.order()?.status;
@@ -93,12 +100,14 @@ export class OrderDetailPage implements OnInit {
   });
 
   private readonly attachments = viewChild(OrderAttachments);
+  private readonly deliveriesBlock = viewChild(OrderDeliveries);
 
   protected readonly moreActions = computed<MenuItem[]>(() => {
     const items: MenuItem[] = [];
     if (this.canEdit && !this.locked()) {
       items.push({ label: 'Editar pedido', icon: 'pi pi-pencil', command: () => void this.router.navigate(['/orders', this.id(), 'edit']) });
     }
+    if (this.canDeliver && !this.locked()) items.push({ label: 'Registrar entrega', icon: 'pi pi-truck', command: () => this.openDelivery() });
     if (this.canSeeMoney && !this.locked()) items.push({ label: 'Registrar pago', icon: 'pi pi-wallet', command: () => this.openPayment() });
     if (!this.locked()) items.push({ label: 'Registrar material', icon: 'pi pi-box', command: () => this.openMaterial() });
     if (!this.locked()) items.push({ label: 'Subir archivo', icon: 'pi pi-upload', command: () => this.tab.set('files') });
@@ -114,13 +123,15 @@ export class OrderDetailPage implements OnInit {
     const first = this.order() === null;
     if (first) this.loading.set(true);
     try {
-      const [order, stages, history, payments] = await Promise.all([
+      const [order, stages, history, payments, deliveries] = await Promise.all([
         this.service.get(this.id()),
         this.production.stages(this.id()),
         this.service.history(this.id()),
         this.canSeeMoney ? this.paymentsService.byOrder(this.id()) : Promise.resolve([]),
+        this.canDeliver ? this.deliveriesService.byOrder(this.id()) : Promise.resolve([]),
       ]);
       this.payments.set(payments);
+      this.deliveries.set(deliveries);
       this.order.set(order);
       this.stages.set(stages);
       this.history.set(history);
@@ -143,7 +154,7 @@ export class OrderDetailPage implements OnInit {
         this.openPayment();
         break;
       case 'delivery':
-        this.tab.set('summary');
+        this.openDelivery();
         break;
       case 'status':
         this.statusDialog.set(true);
@@ -177,6 +188,12 @@ export class OrderDetailPage implements OnInit {
         }
       },
     });
+  }
+
+  protected openDelivery(): void {
+    this.tab.set('summary');
+    // El bloque de entregas vive en la pestaña Resumen; esperar a que se renderice.
+    setTimeout(() => this.deliveriesBlock()?.openNew());
   }
 
   protected openPayment(): void {

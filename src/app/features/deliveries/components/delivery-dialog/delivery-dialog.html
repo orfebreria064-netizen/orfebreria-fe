@@ -1,0 +1,85 @@
+<p-dialog
+  [header]="isEdit() ? 'Entrega ' + (delivery()?.number ?? '') : markDelivered() ? 'Registrar entrega' : 'Programar entrega'"
+  [(visible)]="visible"
+  [modal]="true"
+  [style]="{ width: '600px' }"
+  [draggable]="false"
+>
+  <form [formGroup]="form" (ngSubmit)="save()" class="form-grid" novalidate>
+    @if (!orderId() && !isEdit()) {
+      <div class="field field--full">
+        <label for="dl-order">Pedido <span class="req">*</span></label>
+        <app-order-picker inputId="dl-order" formControlName="order_id" (orderSelected)="setOrder($event)" />
+        <app-field-error [control]="form.controls.order_id" />
+      </div>
+    }
+
+    @if (order(); as o) {
+      <div class="field--full">
+        <p class="small" style="margin: 0 0 0.5rem"><strong>{{ o.number }}</strong> · {{ o.title }}</p>
+        <div class="amounts">
+          <div><small>Total</small><strong>{{ o.total | money }}</strong></div>
+          <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money }}</strong></div>
+          <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></div>
+        </div>
+      </div>
+      @if (o.balance > 0) {
+        <p-message class="field--full" severity="warn" [text]="'El pedido tiene un saldo pendiente de ' + (o.balance | money) + '. Puede entregarse, pero quedará registrado.'" />
+      }
+      @if (!o.qc_approved && isDelivered()) {
+        <p-message class="field--full" severity="error" text="El control de calidad del pedido no está aprobado: complete la producción antes de registrar la entrega." />
+      }
+    }
+
+    <div class="field">
+      <label for="dl-status">Estado <span class="req">*</span></label>
+      <p-select inputId="dl-status" [options]="statusOptions" formControlName="status" optionLabel="label" optionValue="value" appendTo="body" />
+    </div>
+    <div class="field">
+      <label for="dl-date">Fecha programada <span class="req">*</span></label>
+      <p-datepicker inputId="dl-date" formControlName="scheduled_date" dateFormat="dd/mm/yy" [showIcon]="true" appendTo="body" [fluid]="true" />
+      <app-field-error [control]="form.controls.scheduled_date" />
+    </div>
+    <div class="field">
+      <label for="dl-resp">Responsable</label>
+      <p-select inputId="dl-resp" [options]="lookups.activeStaff()" formControlName="responsible_id" optionLabel="full_name" optionValue="id" placeholder="Sin asignar" [showClear]="true" appendTo="body" />
+    </div>
+
+    @if (isDelivered()) {
+      <div class="field">
+        <label for="dl-real">Fecha real de entrega</label>
+        <p-datepicker inputId="dl-real" formControlName="delivered_at" dateFormat="dd/mm/yy" [showTime]="true" hourFormat="24" [showIcon]="true" appendTo="body" [fluid]="true" />
+      </div>
+      <div class="field">
+        <label for="dl-received">Recibido por</label>
+        <input pInputText id="dl-received" formControlName="received_by" placeholder="Nombre de quien recibe" />
+      </div>
+      <div class="field">
+        <label>Conformidad del cliente <span class="req">*</span></label>
+        <p-selectbutton [options]="conformityOptions" formControlName="conformity" optionLabel="label" optionValue="value" />
+        <app-field-error [control]="form.controls.conformity" />
+      </div>
+      <div class="field field--full">
+        <label for="dl-conf-notes">Observaciones de conformidad</label>
+        <textarea pTextarea id="dl-conf-notes" formControlName="conformity_notes" rows="2" [autoResize]="true"></textarea>
+      </div>
+      <div class="field field--full">
+        <label>Firma del cliente (opcional)</label>
+        @if (delivery()?.signature_path) {
+          <small class="muted">Ya existe una firma registrada; si firma de nuevo se reemplazará.</small>
+        }
+        <app-signature-pad />
+      </div>
+    }
+
+    <div class="field field--full">
+      <label for="dl-notes">Observaciones</label>
+      <textarea pTextarea id="dl-notes" formControlName="notes" rows="2" [autoResize]="true"></textarea>
+    </div>
+
+    <div class="form-actions field--full" style="margin-top: 0.25rem">
+      <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="visible.set(false)" />
+      <p-button type="submit" [label]="isDelivered() ? 'Registrar entrega' : 'Guardar'" icon="pi pi-check" [loading]="saving()" />
+    </div>
+  </form>
+</p-dialog>
