@@ -1,0 +1,156 @@
+<app-page-header title="Configuración" subtitle="Empresa, usuarios, etapas de producción y tipos de servicio" />
+
+<div class="card">
+  <p-tabs value="company" [scrollable]="true">
+    <p-tablist>
+      <p-tab value="company"><i class="pi pi-building"></i> Empresa</p-tab>
+      <p-tab value="users"><i class="pi pi-users"></i> Usuarios</p-tab>
+      <p-tab value="stages"><i class="pi pi-sitemap"></i> Etapas de producción</p-tab>
+      <p-tab value="services"><i class="pi pi-tags"></i> Tipos de servicio</p-tab>
+    </p-tablist>
+    <p-tabpanels>
+      <!-- Empresa -->
+      <p-tabpanel value="company">
+        <form [formGroup]="company" (ngSubmit)="saveCompany()" class="form-grid form-grid--3" novalidate>
+          <div class="field field--span-2">
+            <label for="st-name">Nombre comercial <span class="req">*</span></label>
+            <input pInputText id="st-name" formControlName="company_name" />
+            <app-field-error [control]="company.controls.company_name" />
+          </div>
+          <div class="field">
+            <label for="st-ruc">RUC</label>
+            <input pInputText id="st-ruc" formControlName="tax_id" inputmode="numeric" />
+            <app-field-error [control]="company.controls.tax_id" />
+          </div>
+          <div class="field field--span-2">
+            <label for="st-address">Dirección</label>
+            <input pInputText id="st-address" formControlName="address" />
+          </div>
+          <div class="field">
+            <label for="st-phone">Teléfono</label>
+            <input pInputText id="st-phone" formControlName="phone" />
+            <app-field-error [control]="company.controls.phone" />
+          </div>
+          <div class="field">
+            <label for="st-email">Correo</label>
+            <input pInputText id="st-email" formControlName="email" type="email" />
+            <app-field-error [control]="company.controls.email" />
+          </div>
+          <div class="field">
+            <label for="st-tax">IGV por defecto (%)</label>
+            <p-inputnumber inputId="st-tax" formControlName="tax_rate" [min]="0" [max]="100" suffix=" %" [fluid]="true" />
+            <app-field-error [control]="company.controls.tax_rate" />
+          </div>
+          <div class="field">
+            <label for="st-validity">Vigencia de cotizaciones (días)</label>
+            <p-inputnumber inputId="st-validity" formControlName="quote_validity_days" [min]="1" [max]="365" [fluid]="true" />
+            <app-field-error [control]="company.controls.quote_validity_days" />
+          </div>
+          <div class="field field--full">
+            <label for="st-terms">Condiciones por defecto de las cotizaciones</label>
+            <textarea pTextarea id="st-terms" formControlName="default_terms" rows="3" [autoResize]="true"></textarea>
+          </div>
+          <div class="form-actions field--full">
+            <p-button type="submit" label="Guardar" icon="pi pi-check" [loading]="saving()" />
+          </div>
+        </form>
+      </p-tabpanel>
+
+      <!-- Usuarios -->
+      <p-tabpanel value="users">
+        <p-message
+          severity="info"
+          text="Los usuarios se registran desde «Solicitar acceso» en la pantalla de inicio y quedan pendientes hasta que un administrador los active y les asigne un rol."
+        />
+        <p-table [value]="users()" [scrollable]="true" [tableStyle]="{ 'min-width': '720px' }" styleClass="mt-3">
+          <ng-template #header>
+            <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Registro</th></tr>
+          </ng-template>
+          <ng-template #body let-u>
+            <tr>
+              <td class="strong">{{ u.full_name }} @if (isMe(u)) {<span class="muted small">(usted)</span>}</td>
+              <td>{{ u.email }}</td>
+              <td>
+                <p-select
+                  [options]="roleOptions"
+                  [ngModel]="u.role"
+                  (ngModelChange)="updateUser(u, { role: $event })"
+                  optionLabel="label"
+                  optionValue="value"
+                  [disabled]="isMe(u)"
+                  appendTo="body"
+                  [style]="{ width: '170px' }"
+                />
+              </td>
+              <td>
+                <div class="row">
+                  <p-toggleswitch [ngModel]="u.active" (ngModelChange)="updateUser(u, { active: $event })" [disabled]="isMe(u)" />
+                  @if (u.active) {
+                    <p-tag value="Activo" severity="success" />
+                  } @else {
+                    <p-tag value="Pendiente / inactivo" severity="warn" />
+                  }
+                </div>
+              </td>
+              <td class="nowrap">{{ u.created_at | date: 'dd/MM/yyyy' }}</td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+
+      <!-- Etapas -->
+      <p-tabpanel value="stages">
+        <p class="muted small">Plantilla que se copia a cada pedido al generar sus etapas. El avance se calcula según las etapas completadas.</p>
+        <p-table [value]="stages()" [tableStyle]="{ 'min-width': '520px' }" [scrollable]="true" size="small">
+          <ng-template #header>
+            <tr><th>Orden</th><th>Etapa</th><th>Tipo</th><th>Activa</th><th></th></tr>
+          </ng-template>
+          <ng-template #body let-s let-i="rowIndex">
+            <tr [style.opacity]="s.active ? 1 : 0.5">
+              <td>{{ i + 1 }}</td>
+              <td class="strong">{{ s.name }}</td>
+              <td>
+                @if (s.is_quality_check) {
+                  <p-tag value="Control de calidad" severity="info" />
+                } @else {
+                  <span class="muted small">Trabajo</span>
+                }
+              </td>
+              <td><p-toggleswitch [ngModel]="s.active" (ngModelChange)="toggleStage(s)" /></td>
+              <td class="text-right nowrap">
+                <p-button icon="pi pi-arrow-up" [text]="true" size="small" severity="secondary" ariaLabel="Subir" [disabled]="i === 0" (onClick)="moveStage(i, -1)" />
+                <p-button icon="pi pi-arrow-down" [text]="true" size="small" severity="secondary" ariaLabel="Bajar" [disabled]="i === stages().length - 1" (onClick)="moveStage(i, 1)" />
+              </td>
+            </tr>
+          </ng-template>
+        </p-table>
+        <div class="row" style="margin-top: 1rem">
+          <input pInputText [(ngModel)]="newStage" placeholder="Nueva etapa (ej. Rodiado)" (keyup.enter)="addStage()" />
+          <p-checkbox inputId="new-qc" [(ngModel)]="newStageQc" [binary]="true" />
+          <label for="new-qc" class="small">Control de calidad</label>
+          <p-button label="Agregar" icon="pi pi-plus" [disabled]="!newStage.trim()" (onClick)="addStage()" />
+        </div>
+      </p-tabpanel>
+
+      <!-- Tipos de servicio -->
+      <p-tabpanel value="services">
+        <p-table [value]="serviceTypes()" [tableStyle]="{ 'min-width': '420px' }" [scrollable]="true" size="small">
+          <ng-template #header>
+            <tr><th>Tipo de servicio</th><th>Código</th><th>Activo</th></tr>
+          </ng-template>
+          <ng-template #body let-t>
+            <tr [style.opacity]="t.active ? 1 : 0.5">
+              <td class="strong">{{ t.name }}</td>
+              <td class="muted small">{{ t.code }}</td>
+              <td><p-toggleswitch [ngModel]="t.active" (ngModelChange)="toggleServiceType(t)" /></td>
+            </tr>
+          </ng-template>
+        </p-table>
+        <div class="row" style="margin-top: 1rem">
+          <input pInputText [(ngModel)]="newServiceName" placeholder="Nuevo tipo (ej. Grabado)" (keyup.enter)="addServiceType()" />
+          <p-button label="Agregar" icon="pi pi-plus" [disabled]="!newServiceName.trim()" (onClick)="addServiceType()" />
+        </div>
+      </p-tabpanel>
+    </p-tabpanels>
+  </p-tabs>
+</div>

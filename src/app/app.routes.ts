@@ -62,6 +62,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/deliveries/deliveries.routes').then((m) => m.DELIVERIES_ROUTES),
       },
+      {
+        path: 'settings',
+        data: { breadcrumb: 'Configuración', roles: MODULE_ROLES.settings },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/settings/settings.routes').then((m) => m.SETTINGS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

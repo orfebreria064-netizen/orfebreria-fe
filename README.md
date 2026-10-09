@@ -1,59 +1,76 @@
-# Orfebreria
+# Aurum: gestión para orfebrería (MVP)
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.10.
+Sistema web para talleres de joyería y orfebrería. Cubre el ciclo completo de un trabajo:
+**cliente → cotización → pedido → producción → materiales → pagos → entrega → cierre**, con trazabilidad.
 
-## Development server
+**Stack:** Angular 21 (standalone, signals, zoneless, lazy loading) · PrimeNG 21 · Chart.js · Angular CDK
+· Supabase (PostgreSQL, Auth, Storage, RLS). No hay backend propio.
 
-To start a local development server, run:
+La arquitectura, el modelo entidad-relación, la matriz RLS y las rutas están en [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md).
 
-```bash
-ng serve
-```
+## Puesta en marcha
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+### 1. Base de datos (una sola vez)
 
-## Code scaffolding
+1. Abra **Supabase → SQL Editor** del proyecto y ejecute el contenido completo de [`supabase/schema.sql`](supabase/schema.sql).
+   El archivo crea las tablas, triggers, funciones, políticas RLS y el bucket privado `orders`.
+2. Arranque la app (paso 2) y entre en **Solicitar acceso** para registrar su usuario.
+   **El primer usuario registrado queda como ADMIN activo.** Los siguientes quedan pendientes hasta que un ADMIN
+   los active y les asigne rol en *Configuración → Usuarios*.
+   > El proyecto tiene la confirmación de email activada: confirme el correo antes de iniciar sesión, o desactívela
+   > en *Authentication → Providers → Email* mientras prueba.
+3. (Opcional) Ejecute [`supabase/seed.sql`](supabase/seed.sql) en el SQL Editor para cargar los datos demo:
+   5 clientes, 5 cotizaciones, 8 pedidos en distintos estados, 6 materiales, pagos, etapas y entregas. Los pedidos
+   demo quedan asignados al ADMIN.
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+`supabase/migrations/` es la fuente del esquema. `schema.sql` se regenera con `npm run db:schema`.
 
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the project run:
+### 2. Frontend
 
 ```bash
-ng build
+npm install
+npm start           # http://localhost:4200
+npm run build       # build de producción en dist/
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
+La URL y la clave **publishable (anon)** de Supabase están en `src/environments/`. Esa clave es pública por diseño:
+la seguridad la aplica RLS. **Nunca** coloque la `service_role` key en el frontend.
 
-## Running unit tests
+## Roles
 
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
+| Rol | Acceso |
+|---|---|
+| ADMIN | Todo, incluida la configuración y la reapertura de pedidos cerrados o cancelados |
+| GERENTE | Dashboard, clientes, cotizaciones, pedidos, producción, materiales, pagos (con anulación) y entregas |
+| VENDEDOR | Clientes, cotizaciones, pedidos, pagos y entregas |
+| SUPERVISOR | Pedidos, producción y control de calidad, materiales y entregas |
+| ORFEBRE | Solo los pedidos asignados (a él o a una de sus etapas) y su producción |
 
-```bash
-ng test
-```
+## Reglas de negocio garantizadas por la base de datos
 
-## Running end-to-end tests
+- Numeración correlativa sin duplicados: `COT-2026-000001`, `PED-…`, `ENT-…`
+- Totales, IGV, monto pagado, saldo y estado de pago calculados en PostgreSQL
+- Convertir una cotización solo si está aprobada, una sola vez (se copian cliente, ítems, precios y observaciones)
+- Una sola etapa actual por pedido; avance (%) según etapas completadas; estado del pedido derivado de la producción
+- Al terminar las etapas de trabajo, el pedido pasa a *Control de calidad*; al completar el control, a *Listo para entregar*
+- La entrega exige control de calidad aprobado y conformidad, y registra la fecha real
+- Cerrar exige producción completa, control de calidad aprobado y entrega registrada (el saldo solo genera alerta)
+- Un pedido cerrado o cancelado solo lo modifica un ADMIN
+- Stock con validación de suficiencia; el material del cliente lleva su propio saldo por pedido
+- Un pago mayor al saldo requiere confirmación explícita; los pagos se anulan, no se borran
+- La auditoría (`order_history`) la escriben solo los triggers: nadie puede insertar ni editar historial
 
-For end-to-end (e2e) testing, run:
+## Verificación realizada
 
-```bash
-ng e2e
-```
+- `ng build` (desarrollo y producción) sin errores ni advertencias tras cada fase.
+- Migraciones + seed aplicados sobre PostgreSQL 18 local, con un stub de los esquemas `auth`/`storage` de Supabase.
+- Pruebas de RLS por rol (anon, ADMIN, VENDEDOR, ORFEBRE, usuario inactivo) y el flujo de aceptación completo
+  de 20 pasos ejecutado como usuarios reales con RLS activo.
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+**Pendiente de probar en el proyecto Supabase real:** la UI navegando contra la API, la subida de archivos a Storage
+y el envío de emails de Auth. Esas partes no se pudieron ejecutar en local.
 
-## Additional Resources
+## Fuera del alcance del MVP (la arquitectura lo permite)
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+SaaS multiempresa (las tablas ya tienen `org_id` y RLS por organización), invitación de usuarios (Edge Function
+con `service_role`), facturación electrónica SUNAT, POS, compras, WhatsApp automatizado.
