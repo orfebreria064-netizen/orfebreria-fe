@@ -1,0 +1,61 @@
+<app-page-header title="Clientes" subtitle="Personas y empresas que solicitan trabajos">
+  @if (canWrite) {
+    <p-button label="Nuevo cliente" icon="pi pi-plus" routerLink="/customers/new" />
+  }
+</app-page-header>
+
+<div class="card">
+  <div class="toolbar-filters">
+    <p-iconfield>
+      <p-inputicon styleClass="pi pi-search" />
+      <input pInputText type="search" placeholder="Buscar por nombre, documento, teléfono o correo" [(ngModel)]="search" (ngModelChange)="onSearch()" />
+    </p-iconfield>
+    <div class="row">
+      <p-checkbox inputId="inactive" [(ngModel)]="includeInactive" [binary]="true" (onChange)="load()" />
+      <label for="inactive" class="small">Mostrar inactivos</label>
+    </div>
+  </div>
+
+  <p-table
+    [value]="customers()"
+    [loading]="loading()"
+    [paginator]="customers().length > 15"
+    [rows]="15"
+    [scrollable]="true"
+    scrollDirection="horizontal"
+    dataKey="id"
+    sortField="full_name"
+    [tableStyle]="{ 'min-width': '860px' }"
+    [rowHover]="true"
+  >
+    <ng-template #header>
+      <tr>
+        <th pSortableColumn="full_name">Cliente <p-sortIcon field="full_name" /></th>
+        <th>Tipo</th>
+        <th>Documento</th>
+        <th>Teléfono</th>
+        <th>Correo</th>
+        <th pSortableColumn="city">Ciudad <p-sortIcon field="city" /></th>
+        <th>Estado</th>
+      </tr>
+    </ng-template>
+    <ng-template #body let-c>
+      <tr class="p-datatable-row-clickable" (click)="open(c)">
+        <td><span class="strong">{{ c.full_name }}</span></td>
+        <td>{{ c.person_type | label: personTypeLabels }}</td>
+        <td class="nowrap">{{ c.document_number ? c.document_type + ' ' + c.document_number : '—' }}</td>
+        <td class="nowrap">{{ c.phone || '—' }}</td>
+        <td>{{ c.email || '—' }}</td>
+        <td>{{ c.city || '—' }}</td>
+        <td>
+          <p-tag [value]="c.active ? 'Activo' : 'Inactivo'" [severity]="c.active ? 'success' : 'secondary'" />
+        </td>
+      </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+      <tr>
+        <td colspan="7"><app-empty-state icon="pi pi-users" message="No se encontraron clientes." /></td>
+      </tr>
+    </ng-template>
+  </p-table>
+</div>

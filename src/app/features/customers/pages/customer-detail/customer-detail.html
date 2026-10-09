@@ -1,0 +1,252 @@
+@if (loading() && !customer()) {
+  <p-skeleton height="4rem" styleClass="mb-3" />
+  <div class="grid-cols grid-cols--4" style="margin: 1rem 0"><p-skeleton height="5rem" /><p-skeleton height="5rem" /><p-skeleton height="5rem" /><p-skeleton height="5rem" /></div>
+  <p-skeleton height="20rem" />
+} @else if (customer(); as c) {
+  <app-page-header [title]="c.full_name" backLink="/customers" backLabel="Clientes">
+    <div meta class="row" style="margin-top: 0.5rem">
+      <p-tag [value]="c.person_type | label: labels.person" severity="secondary" />
+      @if (!c.active) {
+        <p-tag value="Inactivo" severity="danger" />
+      }
+      @if (c.document_number) {
+        <span class="muted small">{{ c.document_type }} {{ c.document_number }}</span>
+      }
+    </div>
+    @if (whatsapp(); as wa) {
+      <a [href]="wa" target="_blank" rel="noopener">
+        <p-button label="WhatsApp" icon="pi pi-whatsapp" severity="success" [outlined]="true" />
+      </a>
+    }
+    @if (canQuote) {
+      <p-button label="Nueva cotización" icon="pi pi-file-edit" severity="secondary" [outlined]="true" routerLink="/quotations/new" [queryParams]="{ customer: c.id }" />
+    }
+    @if (canCreateOrder) {
+      <p-button label="Nuevo pedido" icon="pi pi-briefcase" severity="secondary" [outlined]="true" routerLink="/orders/new" [queryParams]="{ customer: c.id }" />
+    }
+    @if (canWrite) {
+      <p-button label="Editar" icon="pi pi-pencil" [routerLink]="['/customers', c.id, 'edit']" />
+    }
+  </app-page-header>
+
+  <div class="grid-cols grid-cols--4" style="margin-bottom: 1rem">
+    <app-stat-card label="Pedidos" [value]="stats()?.orders_count ?? 0" icon="pi pi-briefcase" tone="ink" />
+    <app-stat-card label="Total comprado" [value]="totalPurchased()" icon="pi pi-shopping-bag" tone="gold" />
+    <app-stat-card label="Saldo pendiente" [value]="balance()" icon="pi pi-wallet" [tone]="(stats()?.balance ?? 0) > 0 ? 'red' : 'green'" />
+    <app-stat-card
+      label="Último pedido"
+      [value]="lastOrder()?.number ?? '—'"
+      icon="pi pi-calendar"
+      tone="blue"
+      [hint]="stats()?.last_interaction_at ? 'Última interacción: ' + (stats()!.last_interaction_at | date: 'dd/MM/yyyy') : null"
+      [link]="lastOrder() ? ['/orders', lastOrder()!.id] : null"
+    />
+  </div>
+
+  <div class="card">
+    <p-tabs value="info" [scrollable]="true">
+      <p-tablist>
+        <p-tab value="info"><i class="pi pi-id-card"></i> Información</p-tab>
+        @if (canQuote) {
+          <p-tab value="quotations"><i class="pi pi-file-edit"></i> Cotizaciones ({{ quotations().length }})</p-tab>
+        }
+        <p-tab value="orders"><i class="pi pi-briefcase"></i> Pedidos ({{ orders().length }})</p-tab>
+        @if (canSeePayments) {
+          <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos ({{ payments().length }})</p-tab>
+        }
+        <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
+      </p-tablist>
+      <p-tabpanels>
+        <!-- Información -->
+        <p-tabpanel value="info">
+          <div class="grid-cols">
+            <dl class="dl">
+              <dt>Tipo</dt>
+              <dd>{{ c.person_type | label: labels.person }}</dd>
+              <dt>Documento</dt>
+              <dd>{{ c.document_number ? c.document_type + ' ' + c.document_number : '—' }}</dd>
+              <dt>Teléfono</dt>
+              <dd>{{ c.phone || '—' }}</dd>
+              <dt>WhatsApp</dt>
+              <dd>{{ c.whatsapp || '—' }}</dd>
+              <dt>Correo</dt>
+              <dd>
+                @if (c.email) {
+                  <a [href]="'mailto:' + c.email">{{ c.email }}</a>
+                } @else {
+                  —
+                }
+              </dd>
+            </dl>
+            <dl class="dl">
+              <dt>Dirección</dt>
+              <dd>{{ c.address || '—' }}</dd>
+              <dt>Ciudad</dt>
+              <dd>{{ c.city || '—' }}</dd>
+              <dt>Cliente desde</dt>
+              <dd>{{ c.created_at | date: 'dd/MM/yyyy' }}</dd>
+              <dt>Notas</dt>
+              <dd style="white-space: pre-line">{{ c.notes || '—' }}</dd>
+            </dl>
+          </div>
+
+          <h3 class="section-title row row--between">
+            Contactos adicionales
+            @if (canWrite) {
+              <p-button label="Agregar" icon="pi pi-plus" size="small" [text]="true" (onClick)="openContact()" />
+            }
+          </h3>
+          @if (contacts().length === 0) {
+            <p class="muted small">Sin contactos adicionales.</p>
+          } @else {
+            <p-table [value]="contacts()" [scrollable]="true" [tableStyle]="{ 'min-width': '560px' }" size="small">
+              <ng-template #header>
+                <tr><th>Nombre</th><th>Cargo</th><th>Teléfono</th><th>Correo</th><th></th></tr>
+              </ng-template>
+              <ng-template #body let-ct>
+                <tr>
+                  <td>{{ ct.name }}</td>
+                  <td>{{ ct.position || '—' }}</td>
+                  <td>{{ ct.phone || '—' }}</td>
+                  <td>{{ ct.email || '—' }}</td>
+                  <td class="text-right nowrap">
+                    @if (canWrite) {
+                      <p-button icon="pi pi-pencil" [text]="true" size="small" severity="secondary" ariaLabel="Editar" (onClick)="openContact(ct)" />
+                      <p-button icon="pi pi-trash" [text]="true" size="small" severity="danger" ariaLabel="Eliminar" (onClick)="deleteContact(ct)" />
+                    }
+                  </td>
+                </tr>
+              </ng-template>
+            </p-table>
+          }
+
+          @if (canWrite) {
+            <div class="form-actions">
+              <p-button
+                [label]="c.active ? 'Desactivar cliente' : 'Reactivar cliente'"
+                [icon]="c.active ? 'pi pi-ban' : 'pi pi-check-circle'"
+                [severity]="c.active ? 'danger' : 'success'"
+                [text]="true"
+                (onClick)="toggleActive()"
+              />
+            </div>
+          }
+        </p-tabpanel>
+
+        <!-- Cotizaciones -->
+        @if (canQuote) {
+          <p-tabpanel value="quotations">
+            <p-table [value]="quotations()" [scrollable]="true" [tableStyle]="{ 'min-width': '720px' }" [rowHover]="true">
+              <ng-template #header>
+                <tr><th>Número</th><th>Fecha</th><th>Trabajo</th><th>Estado</th><th class="text-right">Total</th><th>Pedido</th></tr>
+              </ng-template>
+              <ng-template #body let-q>
+                <tr class="p-datatable-row-clickable" [routerLink]="['/quotations', q.id]">
+                  <td class="strong nowrap">{{ q.number }}</td>
+                  <td class="nowrap">{{ q.issue_date | date: 'dd/MM/yyyy' }}</td>
+                  <td>{{ q.title }}</td>
+                  <td><app-status-tag [value]="q.status" [labels]="labels.quotation" [severities]="labels.quotationSeverity" /></td>
+                  <td class="text-right mono nowrap">{{ q.total | money }}</td>
+                  <td class="nowrap">{{ q.order?.number ?? '—' }}</td>
+                </tr>
+              </ng-template>
+              <ng-template #emptymessage>
+                <tr><td colspan="6"><app-empty-state icon="pi pi-file" message="Sin cotizaciones." /></td></tr>
+              </ng-template>
+            </p-table>
+          </p-tabpanel>
+        }
+
+        <!-- Pedidos -->
+        <p-tabpanel value="orders">
+          <p-table [value]="orders()" [scrollable]="true" [tableStyle]="{ 'min-width': '860px' }" [rowHover]="true">
+            <ng-template #header>
+              <tr>
+                <th>Número</th><th>Producto</th><th>Estado</th><th>Avance</th><th>Entrega</th>
+                <th class="text-right">Total</th><th class="text-right">Saldo</th>
+              </tr>
+            </ng-template>
+            <ng-template #body let-o>
+              <tr class="p-datatable-row-clickable" [routerLink]="['/orders', o.id]">
+                <td class="strong nowrap">{{ o.number }}</td>
+                <td>{{ o.title }}</td>
+                <td><app-status-tag [value]="o.status" [labels]="labels.order" [severities]="labels.orderSeverity" /></td>
+                <td style="min-width: 110px"><p-progressbar [value]="o.progress" [style]="{ height: '0.5rem' }" [showValue]="false" /></td>
+                <td class="nowrap">{{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : '—' }}</td>
+                <td class="text-right mono nowrap">{{ o.total | money }}</td>
+                <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0">{{ o.balance | money }}</td>
+              </tr>
+            </ng-template>
+            <ng-template #emptymessage>
+              <tr><td colspan="7"><app-empty-state icon="pi pi-briefcase" message="Sin pedidos." /></td></tr>
+            </ng-template>
+          </p-table>
+        </p-tabpanel>
+
+        <!-- Pagos -->
+        @if (canSeePayments) {
+          <p-tabpanel value="payments">
+            <p-table [value]="payments()" [scrollable]="true" [tableStyle]="{ 'min-width': '640px' }">
+              <ng-template #header>
+                <tr><th>Fecha</th><th>Pedido</th><th>Método</th><th>Referencia</th><th class="text-right">Monto</th></tr>
+              </ng-template>
+              <ng-template #body let-p>
+                <tr [style.opacity]="p.voided ? 0.5 : 1">
+                  <td class="nowrap">{{ p.payment_date | date: 'dd/MM/yyyy' }}</td>
+                  <td><a class="link" [routerLink]="['/orders', p.order_id]">{{ p.order?.number }}</a></td>
+                  <td>
+                    {{ p.method | label: labels.method }}
+                    @if (p.is_advance) {
+                      <p-tag value="Adelanto" severity="info" />
+                    }
+                    @if (p.voided) {
+                      <p-tag value="Anulado" severity="danger" />
+                    }
+                  </td>
+                  <td>{{ p.reference || '—' }}</td>
+                  <td class="text-right mono nowrap" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money }}</td>
+                </tr>
+              </ng-template>
+              <ng-template #emptymessage>
+                <tr><td colspan="5"><app-empty-state icon="pi pi-wallet" message="Sin pagos registrados." /></td></tr>
+              </ng-template>
+            </p-table>
+          </p-tabpanel>
+        }
+
+        <!-- Historial -->
+        <p-tabpanel value="history">
+          <app-history-timeline [items]="history()" [showOrder]="true" />
+        </p-tabpanel>
+      </p-tabpanels>
+    </p-tabs>
+  </div>
+
+  <p-dialog [header]="'Contacto'" [(visible)]="contactDialog" [modal]="true" [style]="{ width: '480px' }" [draggable]="false">
+    <form [formGroup]="contactForm" (ngSubmit)="saveContact()" class="form-grid" novalidate>
+      <div class="field field--full">
+        <label for="ct-name">Nombre <span class="req">*</span></label>
+        <input pInputText id="ct-name" formControlName="name" />
+        <app-field-error [control]="contactForm.controls.name" />
+      </div>
+      <div class="field">
+        <label for="ct-position">Cargo</label>
+        <input pInputText id="ct-position" formControlName="position" />
+      </div>
+      <div class="field">
+        <label for="ct-phone">Teléfono</label>
+        <input pInputText id="ct-phone" formControlName="phone" type="tel" />
+        <app-field-error [control]="contactForm.controls.phone" />
+      </div>
+      <div class="field field--full">
+        <label for="ct-email">Correo</label>
+        <input pInputText id="ct-email" formControlName="email" type="email" />
+        <app-field-error [control]="contactForm.controls.email" />
+      </div>
+      <div class="form-actions field--full" style="margin-top: 0.5rem">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="contactDialog.set(false)" />
+        <p-button type="submit" label="Guardar" icon="pi pi-check" [loading]="savingContact()" />
+      </div>
+    </form>
+  </p-dialog>
+}

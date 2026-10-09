@@ -1,5 +1,6 @@
 import { Routes } from '@angular/router';
-import { authGuard, guestGuard, homeRedirectGuard } from './core/guards/auth.guards';
+import { authGuard, guestGuard, homeRedirectGuard, roleGuard } from './core/guards/auth.guards';
+import { MODULE_ROLES } from './core/auth/roles';
 import { MainLayout } from './layout/main-layout/main-layout';
 
 export const routes: Routes = [
@@ -13,6 +14,12 @@ export const routes: Routes = [
     canActivateChild: [authGuard],
     children: [
       { path: '', pathMatch: 'full', canActivate: [homeRedirectGuard], children: [] },
+      {
+        path: 'customers',
+        data: { breadcrumb: 'Clientes', roles: MODULE_ROLES.customers },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/customers/customers.routes').then((m) => m.CUSTOMERS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

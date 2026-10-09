@@ -1,0 +1,84 @@
+<form [formGroup]="form" (ngSubmit)="submit()" novalidate>
+  <div class="field" style="margin-bottom: 1rem">
+    <label>Tipo de persona</label>
+    <p-selectbutton [options]="personTypes" formControlName="person_type" optionLabel="label" optionValue="value" [allowEmpty]="false" />
+  </div>
+
+  <div class="form-grid" [class.form-grid--3]="!compact()">
+    @if (isCompany) {
+      <div class="field field--span-2">
+        <label for="business_name">Razón social <span class="req">*</span></label>
+        <input pInputText id="business_name" formControlName="business_name" />
+        <app-field-error [control]="form.controls.business_name" />
+      </div>
+    } @else {
+      <div class="field">
+        <label for="first_name">Nombres <span class="req">*</span></label>
+        <input pInputText id="first_name" formControlName="first_name" autocomplete="given-name" />
+        <app-field-error [control]="form.controls.first_name" />
+      </div>
+      <div class="field">
+        <label for="last_name">Apellidos</label>
+        <input pInputText id="last_name" formControlName="last_name" autocomplete="family-name" />
+        <app-field-error [control]="form.controls.last_name" />
+      </div>
+    }
+
+    <div class="field">
+      <label for="document_type">Tipo de documento</label>
+      <p-select inputId="document_type" [options]="documentTypes" formControlName="document_type" optionLabel="label" optionValue="value" />
+    </div>
+    <div class="field">
+      <label for="document_number">N.° de documento</label>
+      <input pInputText id="document_number" formControlName="document_number" inputmode="numeric" />
+      <app-field-error [control]="form.controls.document_number" />
+    </div>
+
+    <div class="field">
+      <label for="phone">Teléfono</label>
+      <input pInputText id="phone" formControlName="phone" type="tel" autocomplete="tel" (blur)="copyPhoneToWhatsapp()" />
+      <app-field-error [control]="form.controls.phone" />
+    </div>
+    <div class="field">
+      <label for="whatsapp">WhatsApp</label>
+      <input pInputText id="whatsapp" formControlName="whatsapp" type="tel" />
+      <app-field-error [control]="form.controls.whatsapp" />
+    </div>
+    <div class="field">
+      <label for="email">Correo electrónico</label>
+      <input pInputText id="email" formControlName="email" type="email" autocomplete="email" />
+      <app-field-error [control]="form.controls.email" />
+    </div>
+
+    @if (!compact()) {
+      <div class="field field--span-2">
+        <label for="address">Dirección</label>
+        <input pInputText id="address" formControlName="address" autocomplete="street-address" />
+        <app-field-error [control]="form.controls.address" />
+      </div>
+    }
+    <div class="field">
+      <label for="city">Ciudad / distrito</label>
+      <input pInputText id="city" formControlName="city" />
+    </div>
+
+    @if (!compact()) {
+      <div class="field field--full">
+        <label for="notes">Notas</label>
+        <textarea pTextarea id="notes" formControlName="notes" rows="3" [autoResize]="true"></textarea>
+        <app-field-error [control]="form.controls.notes" />
+      </div>
+      @if (customer()) {
+        <div class="field">
+          <label for="active">Cliente activo</label>
+          <p-toggleswitch inputId="active" formControlName="active" />
+        </div>
+      }
+    }
+  </div>
+
+  <div class="form-actions">
+    <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="cancelled.emit()" />
+    <p-button type="submit" [label]="customer() ? 'Guardar cambios' : 'Crear cliente'" icon="pi pi-check" [loading]="saving()" />
+  </div>
+</form>
