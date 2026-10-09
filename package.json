@@ -6,17 +6,26 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test"
+    "test": "ng test",
+    "db:schema": "node scripts/build-schema.mjs"
   },
   "private": true,
   "packageManager": "npm@11.13.0",
   "dependencies": {
+    "@angular/cdk": "^21.2.0",
     "@angular/common": "^21.2.0",
     "@angular/compiler": "^21.2.0",
     "@angular/core": "^21.2.0",
     "@angular/forms": "^21.2.0",
     "@angular/platform-browser": "^21.2.0",
     "@angular/router": "^21.2.0",
+    "@primeuix/themes": "^3.0.1",
+    "@supabase/supabase-js": "^2.117.3",
+    "chart.js": "^4.5.1",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
+    "primeicons": "^8.0.2",
+    "primeng": "^21.1.10",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0"
   },

@@ -1,1 +1,338 @@
-/* You can add global styles to this file, and also import other style files */
+/* ====================================================================
+   Estilos globales — tokens, utilidades de layout y ajustes PrimeNG.
+   (Sin PrimeFlex: unas pocas utilidades propias con CSS moderno.)
+   ==================================================================== */
+
+:root {
+  --app-sidebar-width: 248px;
+  --app-sidebar-bg: #1f2430;
+  --app-sidebar-fg: #c9ccd3;
+  --app-sidebar-muted: #8a909c;
+  --app-bg: #f6f5f2;
+  --app-radius: 0.75rem;
+  --app-gap: 1rem;
+  font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  background: var(--app-bg);
+  color: var(--p-surface-800);
+  font-size: 0.925rem;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--p-primary-700);
+}
+
+/* ---------- Tarjetas y secciones ---------- */
+.card {
+  background: var(--p-surface-0);
+  border: 1px solid var(--p-surface-200);
+  border-radius: var(--app-radius);
+  padding: 1.25rem;
+}
+
+.card + .card {
+  margin-top: var(--app-gap);
+}
+
+.card__title {
+  margin: 0 0 1rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--p-surface-900);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.section-title {
+  margin: 1.25rem 0 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--p-surface-500);
+}
+
+/* ---------- Formularios ---------- */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+}
+
+.form-grid--3 {
+  --cols: 3;
+}
+
+.form-grid--4 {
+  --cols: 4;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.field > label {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--p-surface-700);
+}
+
+.field > label .req {
+  color: var(--p-red-500);
+}
+
+.field--full {
+  grid-column: 1 / -1;
+}
+
+.field--span-2 {
+  grid-column: span 2;
+}
+
+.field .p-inputtext,
+.field .p-select,
+.field .p-datepicker,
+.field .p-inputnumber,
+.field .p-textarea,
+.field .p-autocomplete,
+.field .p-password {
+  width: 100%;
+}
+
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+/* ---------- Grillas de contenido ---------- */
+.grid-cols {
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 2), minmax(0, 1fr));
+  gap: var(--app-gap);
+}
+
+.grid-cols--3 {
+  --cols: 3;
+}
+
+.grid-cols--4 {
+  --cols: 4;
+}
+
+/* Lista de definición (dato: valor) */
+.dl {
+  display: grid;
+  grid-template-columns: minmax(110px, 40%) 1fr;
+  gap: 0.55rem 1rem;
+  margin: 0;
+}
+
+.dl dt {
+  color: var(--p-surface-500);
+  font-size: 0.85rem;
+}
+
+.dl dd {
+  margin: 0;
+  font-weight: 500;
+  color: var(--p-surface-800);
+  word-break: break-word;
+}
+
+/* ---------- Utilidades ---------- */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.row--between {
+  justify-content: space-between;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-gap);
+}
+
+.muted {
+  color: var(--p-surface-500);
+}
+
+.small {
+  font-size: 0.82rem;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.nowrap {
+  white-space: nowrap;
+}
+
+.mono {
+  font-variant-numeric: tabular-nums;
+}
+
+.strong {
+  font-weight: 600;
+}
+
+.text-danger {
+  color: var(--p-red-600);
+}
+
+.text-success {
+  color: var(--p-green-700);
+}
+
+.text-warn {
+  color: var(--p-orange-600);
+}
+
+.link {
+  color: var(--p-primary-700);
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.link:hover {
+  text-decoration: underline;
+}
+
+.toolbar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.toolbar-filters .p-iconfield {
+  flex: 1 1 260px;
+  max-width: 380px;
+}
+
+.toolbar-filters .p-iconfield .p-inputtext {
+  width: 100%;
+}
+
+/* ---------- Tablas ---------- */
+.p-datatable .p-datatable-thead > tr > th {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--p-surface-500);
+  background: var(--p-surface-50);
+  white-space: nowrap;
+}
+
+.p-datatable .p-datatable-tbody > tr > td {
+  font-size: 0.9rem;
+}
+
+.p-datatable-row-clickable {
+  cursor: pointer;
+}
+
+/* ---------- Drawer del menú móvil ---------- */
+.app-drawer.p-drawer {
+  width: var(--app-sidebar-width) !important;
+  background: var(--app-sidebar-bg);
+  border: 0;
+}
+
+/* ---------- Responsive ---------- */
+@media (max-width: 1199px) {
+  .grid-cols--4 {
+    --cols: 2;
+  }
+
+  .form-grid--4 {
+    --cols: 2;
+  }
+}
+
+@media (max-width: 991px) {
+  .grid-cols--3 {
+    --cols: 1;
+  }
+
+  .form-grid--3 {
+    --cols: 2;
+  }
+}
+
+@media (max-width: 767px) {
+  .grid-cols,
+  .grid-cols--4 {
+    --cols: 1;
+  }
+
+  .form-grid,
+  .form-grid--3,
+  .form-grid--4 {
+    --cols: 1;
+  }
+
+  .field--span-2 {
+    grid-column: auto;
+  }
+
+  .card {
+    padding: 1rem;
+  }
+
+  .form-actions > * {
+    flex: 1 1 auto;
+  }
+
+  .p-dialog {
+    width: calc(100vw - 1.5rem) !important;
+    max-height: 92dvh;
+  }
+}
+
+/* ---------- Impresión ---------- */
+@media print {
+  .shell__sidebar,
+  app-topbar,
+  .no-print {
+    display: none !important;
+  }
+
+  .shell {
+    display: block !important;
+  }
+
+  body {
+    background: #fff;
+  }
+}

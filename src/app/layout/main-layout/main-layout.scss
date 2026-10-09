@@ -1,0 +1,41 @@
+.shell {
+  display: grid;
+  grid-template-columns: var(--app-sidebar-width) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+.shell__sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.shell__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.shell__content {
+  flex: 1;
+  padding: 1.5rem;
+  max-width: 1440px;
+  width: 100%;
+  margin: 0 auto;
+}
+
+@media (max-width: 991px) {
+  .shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .shell__sidebar {
+    display: none;
+  }
+
+  .shell__content {
+    padding: 1rem;
+  }
+}
