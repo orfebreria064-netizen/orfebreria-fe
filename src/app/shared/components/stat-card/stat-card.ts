@@ -8,7 +8,7 @@ export type StatTone = 'gold' | 'ink' | 'green' | 'red' | 'blue' | 'orange';
   selector: 'app-stat-card',
   imports: [RouterLink],
   template: `
-    <a class="stat" [class]="'stat stat--' + tone()" [routerLink]="link()" [class.stat--static]="!link()">
+    <a class="stat" [class]="'stat stat--' + tone()" [routerLink]="link()" [queryParams]="queryParams()" [class.stat--static]="!link()">
       <span class="stat__icon"><i [class]="icon()"></i></span>
       <span class="stat__body">
         <span class="stat__label">{{ label() }}</span>
@@ -108,4 +108,5 @@ export class StatCard {
   readonly tone = input<StatTone>('gold');
   readonly hint = input<string | null>(null);
   readonly link = input<string | unknown[] | null>(null);
+  readonly queryParams = input<Record<string, string> | null>(null);
 }

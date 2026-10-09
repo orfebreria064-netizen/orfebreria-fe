@@ -1,0 +1,105 @@
+<app-page-header title="Dashboard" [subtitle]="'Hola, ' + auth.userName() + ' · ' + (today | date: 'EEEE d \'de\' MMMM')">
+  <p-button label="Actualizar" icon="pi pi-refresh" severity="secondary" [outlined]="true" [loading]="loading()" (onClick)="load()" />
+  <p-button label="Nuevo pedido" icon="pi pi-plus" routerLink="/orders/new" />
+</app-page-header>
+
+@if (!data()) {
+  <div class="kpis">
+    @for (i of [1, 2, 3, 4, 5, 6, 7]; track i) {
+      <p-skeleton height="5.2rem" />
+    }
+  </div>
+  <div class="grid-cols" style="margin-top: 1rem"><p-skeleton height="18rem" /><p-skeleton height="18rem" /></div>
+} @else {
+  @let d = data()!;
+  <div class="kpis">
+    <app-stat-card label="Pedidos activos" [value]="d.kpis.active_orders" icon="pi pi-briefcase" tone="ink" link="/orders" />
+    <app-stat-card label="En producción" [value]="d.kpis.in_production" icon="pi pi-cog" tone="orange" link="/production" />
+    <app-stat-card label="Por entregar" [value]="d.kpis.ready_to_deliver" icon="pi pi-truck" tone="blue" link="/deliveries" />
+    <app-stat-card label="Cotizaciones pendientes" [value]="d.kpis.pending_quotations" icon="pi pi-file-edit" tone="gold" link="/quotations" />
+    <app-stat-card label="Ventas del mes" [value]="money(d.kpis.sales_month)" icon="pi pi-chart-line" tone="green" [hint]="'Cobrado: ' + money(d.kpis.collected_month)" />
+    <app-stat-card label="Total por cobrar" [value]="money(d.kpis.receivable)" icon="pi pi-wallet" tone="red" link="/payments" />
+    <app-stat-card
+      label="Pedidos atrasados"
+      [value]="d.kpis.overdue_orders"
+      icon="pi pi-exclamation-triangle"
+      [tone]="d.kpis.overdue_orders ? 'red' : 'green'"
+      link="/orders"
+      [queryParams]="{ overdue: '1' }"
+    />
+  </div>
+
+  <div class="dash-grid">
+    <app-chart-card class="span-2" title="Ventas y cobranza por mes (S/)" [labels]="salesChart().labels" [series]="salesChart().series" [format]="compactMoney" />
+    <app-chart-card title="Pedidos por estado" [labels]="statusChart().labels" [series]="statusChart().series" [horizontal]="true" height="300px" [format]="integer" />
+    <app-chart-card title="Pedidos por tipo de servicio" [labels]="serviceChart().labels" [series]="serviceChart().series" [horizontal]="true" [format]="integer" />
+    <app-chart-card title="Producción por etapa actual" [labels]="stageChart().labels" [series]="stageChart().series" [format]="integer" />
+
+    <section class="card alerts">
+      <h2 class="card__title">Alertas <span class="muted small">{{ alertCount() }}</span></h2>
+      @if (alertCount() === 0) {
+        <app-empty-state icon="pi pi-check-circle" message="Todo en orden. No hay alertas." />
+      }
+      @if (d.alerts.overdue.length) {
+        <h3 class="alert-title alert-title--critical"><i class="pi pi-exclamation-circle"></i> Pedidos atrasados</h3>
+        @for (a of d.alerts.overdue; track a.id) {
+          <a class="alert-row" [routerLink]="['/orders', a.id]">
+            <span><strong>{{ a.number }}</strong> · {{ a.customer_name }}</span>
+            <span class="text-danger small">{{ daysLabel(a.due_date) }}</span>
+          </a>
+        }
+      }
+      @if (d.alerts.upcoming.length) {
+        <h3 class="alert-title alert-title--warning"><i class="pi pi-calendar-clock"></i> Entregas próximas (7 días)</h3>
+        @for (a of d.alerts.upcoming; track a.id) {
+          <a class="alert-row" [routerLink]="['/orders', a.id]">
+            <span><strong>{{ a.number }}</strong> · {{ a.customer_name }}</span>
+            <span class="small muted">{{ daysLabel(a.due_date) }}</span>
+          </a>
+        }
+      }
+      @if (d.alerts.pending_payments.length) {
+        <h3 class="alert-title alert-title--serious"><i class="pi pi-wallet"></i> Pagos pendientes (listos o entregados)</h3>
+        @for (a of d.alerts.pending_payments; track a.id) {
+          <a class="alert-row" [routerLink]="['/orders', a.id]">
+            <span><strong>{{ a.number }}</strong> · {{ a.customer_name }}</span>
+            <span class="mono small text-danger">{{ a.balance | money }}</span>
+          </a>
+        }
+      }
+      @if (d.alerts.pending_quotations.length) {
+        <h3 class="alert-title alert-title--info"><i class="pi pi-file-edit"></i> Cotizaciones pendientes</h3>
+        @for (a of d.alerts.pending_quotations; track a.id) {
+          <a class="alert-row" [routerLink]="['/quotations', a.id]">
+            <span><strong>{{ a.number }}</strong> · {{ a.customer_name }}</span>
+            <span class="small muted">vence {{ a.expiry_date | date: 'dd/MM' }}</span>
+          </a>
+        }
+      }
+    </section>
+  </div>
+
+  <section class="card" style="margin-top: 1rem">
+    <h2 class="card__title">Próximas entregas</h2>
+    <p-table [value]="d.upcoming_deliveries" [scrollable]="true" [tableStyle]="{ 'min-width': '760px' }" [rowHover]="true" size="small">
+      <ng-template #header>
+        <tr><th>Pedido</th><th>Cliente</th><th>Producto</th><th>Fecha de entrega</th><th>Estado</th><th class="text-right">Saldo</th></tr>
+      </ng-template>
+      <ng-template #body let-u>
+        <tr class="p-datatable-row-clickable" [routerLink]="['/orders', u.id]">
+          <td class="strong nowrap">{{ u.number }}</td>
+          <td>{{ u.customer_name }}</td>
+          <td>{{ u.title }}</td>
+          <td class="nowrap" [class.text-danger]="isLate(u.due_date)">
+            {{ u.due_date | date: 'dd/MM/yyyy' }} <small class="muted">({{ daysLabel(u.due_date) }})</small>
+          </td>
+          <td class="nowrap"><app-status-tag [value]="u.status" [labels]="labels" [severities]="severities" /></td>
+          <td class="text-right mono nowrap" [class.text-danger]="u.balance > 0">{{ u.balance | money }}</td>
+        </tr>
+      </ng-template>
+      <ng-template #emptymessage>
+        <tr><td colspan="6"><app-empty-state icon="pi pi-truck" message="No hay entregas programadas." /></td></tr>
+      </ng-template>
+    </p-table>
+  </section>
+}

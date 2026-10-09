@@ -15,6 +15,12 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', canActivate: [homeRedirectGuard], children: [] },
       {
+        path: 'dashboard',
+        data: { breadcrumb: 'Dashboard', roles: MODULE_ROLES.dashboard },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/dashboard/dashboard.routes').then((m) => m.DASHBOARD_ROUTES),
+      },
+      {
         path: 'customers',
         data: { breadcrumb: 'Clientes', roles: MODULE_ROLES.customers },
         canActivate: [roleGuard],
