@@ -1,0 +1,28 @@
+.order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-top: 0.6rem;
+  font-size: 0.875rem;
+  color: var(--p-surface-600);
+
+  i {
+    color: var(--p-surface-400);
+    margin-right: 0.15rem;
+  }
+}
+
+.show-sm {
+  display: none;
+}
+
+@media (max-width: 767px) {
+  .hide-sm {
+    display: none;
+  }
+
+  .show-sm {
+    display: inline-flex;
+  }
+}

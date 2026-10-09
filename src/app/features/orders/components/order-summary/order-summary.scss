@@ -1,0 +1,80 @@
+.next-action {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.9rem 1rem;
+  border-radius: 0.6rem;
+  background: var(--p-primary-50);
+  border: 1px solid var(--p-primary-200);
+  flex-wrap: wrap;
+}
+.next-action > i {
+  font-size: 1.35rem;
+  color: var(--p-primary-600);
+}
+.next-action > div {
+  flex: 1 1 220px;
+}
+.next-action small {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+  color: var(--p-primary-700);
+}
+.next-action p {
+  margin: 0.1rem 0 0;
+  font-weight: 500;
+}
+.next-action--done {
+  background: var(--p-surface-50);
+  border-color: var(--p-surface-200);
+}
+.specs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.specs > div {
+  display: flex;
+  flex-direction: column;
+  padding: 0.6rem 0.75rem;
+  background: var(--p-surface-50);
+  border-radius: 0.5rem;
+}
+.specs small {
+  color: var(--p-surface-500);
+  font-size: 0.75rem;
+}
+.stage-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.6rem;
+}
+.stage-dot {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  background: var(--p-surface-100);
+  color: var(--p-surface-600);
+}
+.stage-dot[data-status='COMPLETADO'] {
+  background: var(--p-green-100);
+  color: var(--p-green-800);
+}
+.stage-dot[data-status='EN_PROCESO'] {
+  background: var(--p-orange-100);
+  color: var(--p-orange-800);
+}
+.stage-dot[data-status='BLOQUEADO'] {
+  background: var(--p-red-100);
+  color: var(--p-red-800);
+}
+.stage-dot--current {
+  outline: 2px solid var(--p-primary-400);
+}
+@media (max-width: 767px) {
+  .specs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

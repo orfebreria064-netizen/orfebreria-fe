@@ -1,0 +1,100 @@
+<app-page-header
+  [title]="id() ? 'Editar pedido ' + (number() ?? '') : 'Nuevo pedido'"
+  subtitle="Para trabajos cotizados, use «Convertir en pedido» desde la cotización aprobada"
+  [backLink]="id() ? ['/orders', id()] : '/orders'"
+/>
+
+@if (loading()) {
+  <p-skeleton height="16rem" styleClass="mb-3" />
+  <p-skeleton height="14rem" />
+} @else {
+  <form [formGroup]="form" (ngSubmit)="submit()" novalidate class="stack">
+    <section class="card">
+      <h2 class="card__title">Información general</h2>
+      <div class="form-grid form-grid--3">
+        <div class="field field--span-2">
+          <label for="customer">Cliente <span class="req">*</span></label>
+          <app-customer-picker inputId="customer" formControlName="customer_id" />
+          <app-field-error [control]="form.controls.customer_id" />
+        </div>
+        <div class="field">
+          <label for="service_type">Tipo de trabajo <span class="req">*</span></label>
+          <p-select inputId="service_type" [options]="lookups.activeServiceTypes()" formControlName="service_type_id" optionLabel="name" optionValue="id" placeholder="Seleccione" />
+          <app-field-error [control]="form.controls.service_type_id" />
+        </div>
+        <div class="field field--span-2">
+          <label for="title">Producto <span class="req">*</span></label>
+          <input pInputText id="title" formControlName="title" placeholder="Ej. Anillo de oro 18K con diamante" />
+          <app-field-error [control]="form.controls.title" />
+        </div>
+        <div class="field">
+          <label for="priority">Prioridad</label>
+          <p-select inputId="priority" [options]="priorities" formControlName="priority" optionLabel="label" optionValue="value" />
+        </div>
+        <div class="field field--full">
+          <label for="description">Descripción del trabajo</label>
+          <textarea pTextarea id="description" formControlName="description" rows="3" [autoResize]="true"></textarea>
+          <app-field-error [control]="form.controls.description" />
+        </div>
+        <div class="field">
+          <label for="assigned_to">Responsable</label>
+          <p-select inputId="assigned_to" [options]="lookups.activeStaff()" formControlName="assigned_to" optionLabel="full_name" optionValue="id" placeholder="Sin asignar" [showClear]="true" />
+        </div>
+        <div class="field">
+          <label for="start_date">Fecha de inicio <span class="req">*</span></label>
+          <p-datepicker inputId="start_date" formControlName="start_date" dateFormat="dd/mm/yy" [showIcon]="true" appendTo="body" [fluid]="true" />
+          <app-field-error [control]="form.controls.start_date" />
+        </div>
+        <div class="field">
+          <label for="due_date">Fecha de entrega</label>
+          <p-datepicker inputId="due_date" formControlName="due_date" dateFormat="dd/mm/yy" [showIcon]="true" [showClear]="true" appendTo="body" [fluid]="true" />
+          <app-field-error [control]="form.controls.due_date" groupErrorKey="dateRange" />
+        </div>
+      </div>
+
+      <h3 class="section-title">Especificaciones</h3>
+      <div class="form-grid form-grid--4">
+        <div class="field">
+          <label for="main_material">Material</label>
+          <input pInputText id="main_material" formControlName="main_material" placeholder="Oro 18K" />
+        </div>
+        <div class="field">
+          <label for="estimated_weight">Peso estimado</label>
+          <p-inputnumber inputId="estimated_weight" formControlName="estimated_weight" [minFractionDigits]="2" [maxFractionDigits]="2" suffix=" g" locale="es-PE" [fluid]="true" />
+          <app-field-error [control]="form.controls.estimated_weight" />
+        </div>
+        <div class="field">
+          <label for="stone">Piedra</label>
+          <input pInputText id="stone" formControlName="stone" placeholder="Diamante" />
+        </div>
+        <div class="field">
+          <label for="size">Talla</label>
+          <input pInputText id="size" formControlName="size" placeholder="18" />
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 class="card__title">
+        Ítems y precios
+        <span class="row small muted">
+          IGV
+          <p-inputnumber formControlName="tax_rate" [min]="0" [max]="100" suffix=" %" [inputStyle]="{ width: '5rem' }" />
+        </span>
+      </h2>
+      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" />
+    </section>
+
+    <section class="card">
+      <div class="field">
+        <label for="notes">Observaciones</label>
+        <textarea pTextarea id="notes" formControlName="notes" rows="3" [autoResize]="true"></textarea>
+        <app-field-error [control]="form.controls.notes" />
+      </div>
+      <div class="form-actions">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="cancel()" />
+        <p-button type="submit" [label]="id() ? 'Guardar cambios' : 'Crear pedido'" icon="pi pi-check" [loading]="saving()" />
+      </div>
+    </section>
+  </form>
+}

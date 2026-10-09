@@ -1,0 +1,113 @@
+<app-page-header title="Pedidos" subtitle="Órdenes de trabajo: ventas, fabricaciones, reparaciones y modificaciones">
+  @if (canCreate) {
+    <p-button label="Nuevo pedido" icon="pi pi-plus" routerLink="/orders/new" />
+  }
+</app-page-header>
+
+<div class="card">
+  <div class="toolbar-filters">
+    <p-iconfield>
+      <p-inputicon styleClass="pi pi-search" />
+      <input pInputText type="search" placeholder="Buscar por número o producto" [(ngModel)]="search" (ngModelChange)="onSearch()" />
+    </p-iconfield>
+    <p-multiselect
+      [options]="statusOptions"
+      [(ngModel)]="statuses"
+      (onChange)="load()"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Todos los estados"
+      selectedItemsLabel="{0} estados"
+      [maxSelectedLabels]="2"
+      [style]="{ minWidth: '210px' }"
+    />
+    <p-select
+      [options]="lookups.activeServiceTypes()"
+      [(ngModel)]="serviceTypeId"
+      (onChange)="load()"
+      optionLabel="name"
+      optionValue="id"
+      placeholder="Tipo de servicio"
+      [showClear]="true"
+      [style]="{ minWidth: '180px' }"
+    />
+    <p-select
+      [options]="lookups.activeStaff()"
+      [(ngModel)]="assignedTo"
+      (onChange)="load()"
+      optionLabel="full_name"
+      optionValue="id"
+      placeholder="Responsable"
+      [showClear]="true"
+      [style]="{ minWidth: '170px' }"
+    />
+    <div class="row">
+      <p-checkbox inputId="overdue" [(ngModel)]="overdueOnly" [binary]="true" (onChange)="load()" />
+      <label for="overdue" class="small">Solo atrasados</label>
+    </div>
+  </div>
+
+  <p-table
+    [value]="rows()"
+    [loading]="loading()"
+    [paginator]="rows().length > 20"
+    [rows]="20"
+    [scrollable]="true"
+    [tableStyle]="{ 'min-width': '1320px' }"
+    [rowHover]="true"
+    dataKey="id"
+  >
+    <ng-template #header>
+      <tr>
+        <th pSortableColumn="number">Número <p-sortIcon field="number" /></th>
+        <th pSortableColumn="customer.full_name">Cliente <p-sortIcon field="customer.full_name" /></th>
+        <th>Producto</th>
+        <th>Tipo</th>
+        <th>Estado</th>
+        <th>Avance</th>
+        <th>Responsable</th>
+        <th pSortableColumn="created_at">Creación <p-sortIcon field="created_at" /></th>
+        <th pSortableColumn="due_date">Entrega <p-sortIcon field="due_date" /></th>
+        <th class="text-right" pSortableColumn="total">Total <p-sortIcon field="total" /></th>
+        <th class="text-right">Pagado</th>
+        <th class="text-right" pSortableColumn="balance">Saldo <p-sortIcon field="balance" /></th>
+      </tr>
+    </ng-template>
+    <ng-template #body let-o>
+      <tr class="p-datatable-row-clickable" (click)="open(o)">
+        <td class="nowrap">
+          <span class="strong">{{ o.number }}</span>
+          @if (o.priority === 'URGENTE' || o.priority === 'ALTA') {
+            <app-status-tag [value]="o.priority" [labels]="priorityLabels" [severities]="prioritySeverity" />
+          }
+        </td>
+        <td>{{ o.customer?.full_name }}</td>
+        <td>{{ o.title }}</td>
+        <td class="nowrap">{{ o.service_type?.name }}</td>
+        <td class="nowrap"><app-status-tag [value]="o.status" [labels]="labels" [severities]="severities" /></td>
+        <td style="min-width: 120px">
+          @if (o.progress > 0 || o.current_stage_name) {
+            <p-progressbar [value]="o.progress" [style]="{ height: '0.45rem' }" [showValue]="false" />
+            <small class="muted">{{ o.current_stage_name ?? 'Completado' }} · {{ o.progress }}%</small>
+          } @else {
+            <span class="muted">—</span>
+          }
+        </td>
+        <td>{{ o.assignee?.full_name ?? '—' }}</td>
+        <td class="nowrap">{{ o.created_at | date: 'dd/MM/yyyy' }}</td>
+        <td class="nowrap" [class.text-danger]="isOverdue(o)" [class.strong]="isOverdue(o)">
+          {{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : '—' }}
+          @if (isOverdue(o)) {
+            <i class="pi pi-exclamation-circle"></i>
+          }
+        </td>
+        <td class="text-right mono nowrap">{{ o.total | money }}</td>
+        <td class="text-right mono nowrap">{{ o.amount_paid | money }}</td>
+        <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0" [class.text-success]="o.balance <= 0">{{ o.balance | money }}</td>
+      </tr>
+    </ng-template>
+    <ng-template #emptymessage>
+      <tr><td colspan="12"><app-empty-state icon="pi pi-briefcase" message="No hay pedidos con esos filtros." /></td></tr>
+    </ng-template>
+  </p-table>
+</div>

@@ -1,0 +1,139 @@
+@let o = order();
+@let next = nextAction();
+
+<div class="next-action" [class.next-action--done]="!next.action">
+  <i class="pi" [class.pi-directions]="next.action" [class.pi-check-circle]="!next.action"></i>
+  <div>
+    <small>Próxima acción</small>
+    <p>{{ next.text }}</p>
+  </div>
+  @if (next.action) {
+    <p-button [label]="next.label!" size="small" (onClick)="act.emit(next.action)" />
+  }
+</div>
+
+<div class="grid-cols" style="margin-top: 1rem">
+  <section>
+    <h3 class="section-title">Cliente</h3>
+    <dl class="dl">
+      <dt>Nombre</dt>
+      <dd><a class="link" [routerLink]="['/customers', o.customer?.id]">{{ o.customer?.full_name }}</a></dd>
+      <dt>Documento</dt>
+      <dd>{{ o.customer?.document_number ? o.customer?.document_type + ' ' + o.customer?.document_number : '—' }}</dd>
+      <dt>Teléfono</dt>
+      <dd>
+        {{ o.customer?.phone || '—' }}
+        @if (whatsapp(); as wa) {
+          <a [href]="wa" target="_blank" rel="noopener" class="link small" style="margin-left: 0.4rem"><i class="pi pi-whatsapp"></i> WhatsApp</a>
+        }
+      </dd>
+      <dt>Correo</dt>
+      <dd>{{ o.customer?.email || '—' }}</dd>
+    </dl>
+  </section>
+
+  <section>
+    <h3 class="section-title">Trabajo</h3>
+    <dl class="dl">
+      <dt>Tipo</dt>
+      <dd>{{ o.service_type?.name }}</dd>
+      <dt>Prioridad</dt>
+      <dd><p-tag [value]="priorityLabels[o.priority]" [severity]="prioritySeverity[o.priority]" /></dd>
+      <dt>Responsable</dt>
+      <dd>{{ o.assignee?.full_name ?? 'Sin asignar' }}</dd>
+      <dt>Inicio / entrega</dt>
+      <dd>
+        {{ o.start_date | date: 'dd/MM/yyyy' }} → {{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : 'sin fecha' }}
+        @if (dueIn() !== null && !['ENTREGADO', 'CERRADO', 'CANCELADO'].includes(o.status)) {
+          <span class="small" [class.text-danger]="dueIn()! < 0" [class.text-warn]="dueIn()! >= 0 && dueIn()! <= 3">
+            ({{ dueIn()! < 0 ? 'atrasado ' + -dueIn()! + ' día(s)' : dueIn() === 0 ? 'hoy' : 'en ' + dueIn() + ' día(s)' }})
+          </span>
+        }
+      </dd>
+      @if (o.quotation) {
+        <dt>Cotización</dt>
+        <dd><a class="link" [routerLink]="['/quotations', o.quotation.id]">{{ o.quotation.number }}</a></dd>
+      }
+      @if (o.delivered_at) {
+        <dt>Entregado</dt>
+        <dd>{{ o.delivered_at | date: 'dd/MM/yyyy HH:mm' }}</dd>
+      }
+    </dl>
+  </section>
+</div>
+
+<h3 class="section-title">Especificaciones</h3>
+<div class="specs">
+  <div><small>Material</small><strong>{{ o.main_material || '—' }}</strong></div>
+  <div><small>Peso estimado</small><strong>{{ o.estimated_weight ? o.estimated_weight + ' g' : '—' }}</strong></div>
+  <div><small>Piedra</small><strong>{{ o.stone || '—' }}</strong></div>
+  <div><small>Talla</small><strong>{{ o.size || '—' }}</strong></div>
+</div>
+@if (o.description) {
+  <p style="white-space: pre-line; margin: 0.75rem 0 0">{{ o.description }}</p>
+}
+@if (o.notes) {
+  <p class="muted" style="white-space: pre-line; margin: 0.5rem 0 0"><strong>Observaciones:</strong> {{ o.notes }}</p>
+}
+
+<div class="grid-cols" style="margin-top: 0.5rem">
+  @if (showMoney()) {
+    <section>
+      <h3 class="section-title row row--between">
+        Información económica
+        <p-tag [value]="paymentLabels[o.payment_status]" [severity]="paymentSeverity[o.payment_status]" />
+      </h3>
+      <dl class="dl">
+        <dt>Total</dt>
+        <dd class="mono">{{ o.total | money }}</dd>
+        <dt>Adelanto</dt>
+        <dd class="mono">{{ advance() | money }}</dd>
+        <dt>Pagado</dt>
+        <dd class="mono text-success">{{ o.amount_paid | money }}</dd>
+        <dt>Saldo</dt>
+        <dd class="mono strong" [class.text-danger]="o.balance > 0">{{ o.balance | money }}</dd>
+      </dl>
+    </section>
+  }
+  <section>
+    <h3 class="section-title">Avance de producción</h3>
+    @if (stages().length === 0) {
+      <p class="muted small">Sin etapas de producción.</p>
+    } @else {
+      <p style="margin: 0 0 0.4rem">
+        Etapa actual: <strong>{{ o.current_stage_name ?? 'Completado' }}</strong>
+        <span class="muted"> · Avance: {{ o.progress }}%</span>
+      </p>
+      <p-progressbar [value]="o.progress" [style]="{ height: '0.6rem' }" [showValue]="false" />
+      <div class="stage-dots">
+        @for (s of stages(); track s.id) {
+          <span class="stage-dot" [attr.data-status]="s.status" [class.stage-dot--current]="s.is_current" [title]="s.name">{{ s.name }}</span>
+        }
+      </div>
+    }
+  </section>
+</div>
+
+<h3 class="section-title">Ítems</h3>
+<p-table [value]="o.items" [scrollable]="true" [tableStyle]="{ 'min-width': '620px' }" size="small">
+  <ng-template #header>
+    <tr>
+      <th>Producto / servicio</th><th>Material</th><th class="text-right">Cantidad</th>
+      @if (showMoney()) {
+        <th class="text-right">Precio</th><th class="text-right">Subtotal</th>
+      }
+    </tr>
+  </ng-template>
+  <ng-template #body let-it>
+    <tr>
+      <td>{{ it.description }} @if (it.detail) {<small class="muted"> · {{ it.detail }}</small>}</td>
+      <td>{{ it.material_name || '—' }}</td>
+      <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
+      @if (showMoney()) {
+        <td class="text-right mono nowrap">{{ it.unit_price | money }}</td>
+        <td class="text-right mono nowrap">{{ it.subtotal | money }}</td>
+      }
+    </tr>
+  </ng-template>
+</p-table>
+

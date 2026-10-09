@@ -1,0 +1,70 @@
+.uploader {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px dashed var(--p-surface-300);
+  border-radius: 0.6rem;
+  background: var(--p-surface-50);
+}
+
+.files {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.9rem;
+}
+
+.file {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--p-surface-200);
+  border-radius: 0.6rem;
+  overflow: hidden;
+  background: var(--p-surface-0);
+}
+
+.file__preview {
+  display: grid;
+  place-items: center;
+  height: 140px;
+  background: var(--p-surface-100);
+  overflow: hidden;
+
+  > i {
+    font-size: 2.5rem;
+    color: var(--p-surface-400);
+  }
+
+  :host ::ng-deep .file__img {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    display: block;
+  }
+
+  :host ::ng-deep .p-image {
+    width: 100%;
+  }
+}
+
+.file__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.7rem 0.8rem 0.2rem;
+  min-width: 0;
+}
+
+.file__name {
+  font-size: 0.875rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file__actions {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0.3rem 0.3rem;
+}

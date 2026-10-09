@@ -26,6 +26,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/quotations/quotations.routes').then((m) => m.QUOTATIONS_ROUTES),
       },
+      {
+        path: 'orders',
+        data: { breadcrumb: 'Pedidos', roles: MODULE_ROLES.orders },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/orders/orders.routes').then((m) => m.ORDERS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

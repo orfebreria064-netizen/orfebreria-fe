@@ -1,0 +1,53 @@
+@if (loading() && !order()) {
+  <p-skeleton height="5rem" styleClass="mb-3" />
+  <p-skeleton height="26rem" />
+} @else if (order(); as o) {
+  <app-page-header [title]="'Pedido ' + o.number" [subtitle]="o.title" backLink="/orders" backLabel="Pedidos">
+    <div meta class="order-meta">
+      <app-status-tag [value]="o.status" [labels]="labels" [severities]="severities" />
+      <span><i class="pi pi-user"></i> <a class="link" [routerLink]="['/customers', o.customer_id]">{{ o.customer?.full_name }}</a></span>
+      <span><i class="pi pi-calendar"></i> Entrega: {{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : 'sin fecha' }}</span>
+      @if (canSeeMoney) {
+        <span><i class="pi pi-wallet"></i> Saldo: <strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></span>
+      }
+    </div>
+
+    @if (o.status === 'ENTREGADO' && canChangeStatus) {
+      <p-button label="Cerrar pedido" icon="pi pi-lock" severity="success" (onClick)="closeOrder()" />
+    }
+    @if (canEdit && !locked()) {
+      <p-button label="Editar" icon="pi pi-pencil" severity="secondary" [outlined]="true" [routerLink]="['/orders', o.id, 'edit']" class="hide-sm" />
+    }
+    @if (canChangeStatus) {
+      <p-button label="Cambiar estado" icon="pi pi-sync" severity="secondary" [outlined]="true" (onClick)="statusDialog.set(true)" class="hide-sm" />
+    }
+    @if (!locked()) {
+      <p-button label="Subir archivo" icon="pi pi-upload" severity="secondary" [outlined]="true" (onClick)="openFiles()" class="hide-sm" />
+    }
+    <p-button icon="pi pi-ellipsis-v" severity="secondary" [outlined]="true" ariaLabel="Más acciones" (onClick)="menu.toggle($event)" class="show-sm" />
+    <p-menu #menu [model]="moreActions()" [popup]="true" appendTo="body" />
+  </app-page-header>
+
+  <div class="card">
+    <p-tabs [(value)]="tab" [scrollable]="true">
+      <p-tablist>
+        <p-tab value="summary"><i class="pi pi-th-large"></i> Resumen</p-tab>
+        <p-tab value="files"><i class="pi pi-paperclip"></i> Archivos</p-tab>
+        <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
+      </p-tablist>
+      <p-tabpanels>
+        <p-tabpanel value="summary">
+          <app-order-summary [order]="o" [stages]="stages()" [showMoney]="canSeeMoney" (act)="onAction($event)" />
+        </p-tabpanel>
+        <p-tabpanel value="files">
+          <app-order-attachments [orderId]="o.id" [readonly]="locked()" (changed)="refreshAfterFiles()" />
+        </p-tabpanel>
+        <p-tabpanel value="history">
+          <app-history-timeline [items]="history()" />
+        </p-tabpanel>
+      </p-tabpanels>
+    </p-tabs>
+  </div>
+
+  <app-status-dialog [order]="o" [(visible)]="statusDialog" (changed)="load()" />
+}

@@ -1,0 +1,66 @@
+@if (!readonly()) {
+  <div class="uploader">
+    <div class="form-grid form-grid--3">
+      <div class="field">
+        <label for="att-category">Categoría</label>
+        <p-select inputId="att-category" [options]="categories" [(ngModel)]="category" optionLabel="label" optionValue="value" />
+      </div>
+      <div class="field field--span-2">
+        <label for="att-desc">Descripción (opcional)</label>
+        <input pInputText id="att-desc" [(ngModel)]="description" placeholder="Ej. Boceto aprobado por el cliente" />
+      </div>
+    </div>
+    <p-fileupload
+      #uploader
+      mode="basic"
+      [multiple]="true"
+      [auto]="false"
+      [customUpload]="true"
+      accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx"
+      [maxFileSize]="10485760"
+      chooseLabel="Seleccionar y subir archivos"
+      chooseIcon="pi pi-upload"
+      [disabled]="uploading()"
+      (onSelect)="upload($event, uploader)"
+      invalidFileSizeMessageSummary="{0}: archivo demasiado grande."
+      invalidFileSizeMessageDetail="El tamaño máximo es {0}."
+      invalidFileTypeMessageSummary="{0}: tipo de archivo no permitido."
+      invalidFileTypeMessageDetail="Tipos permitidos: {0}."
+    />
+    @if (uploading()) {
+      <small class="muted"><i class="pi pi-spin pi-spinner"></i> Subiendo…</small>
+    }
+  </div>
+}
+
+@if (!loading() && files().length === 0) {
+  <app-empty-state icon="pi pi-images" message="Sin archivos. Suba fotos, diseños, bocetos o documentos del trabajo." />
+}
+
+<div class="files">
+  @for (a of files(); track a.id) {
+    <article class="file">
+      <div class="file__preview">
+        @if (isImage(a) && a.url) {
+          <p-image [src]="a.url" [alt]="a.file_name" [preview]="true" imageClass="file__img" />
+        } @else {
+          <i class="pi" [class.pi-file-pdf]="a.mime_type === 'application/pdf'" [class.pi-file]="a.mime_type !== 'application/pdf'"></i>
+        }
+      </div>
+      <div class="file__body">
+        <p-tag [value]="a.category | label: categoryLabels" severity="secondary" />
+        <strong class="file__name" [title]="a.file_name">{{ a.file_name }}</strong>
+        @if (a.description) {
+          <small>{{ a.description }}</small>
+        }
+        <small class="muted">{{ a.created_at | date: 'dd/MM/yyyy HH:mm' }} · {{ fileSize(a.size_bytes) }}</small>
+      </div>
+      <div class="file__actions">
+        <p-button icon="pi pi-download" [text]="true" severity="secondary" ariaLabel="Descargar" (onClick)="download(a)" />
+        @if (!readonly()) {
+          <p-button icon="pi pi-trash" [text]="true" severity="danger" ariaLabel="Eliminar" (onClick)="remove(a)" />
+        }
+      </div>
+    </article>
+  }
+</div>
