@@ -1,0 +1,50 @@
+<p-dialog header="Registrar pago" [(visible)]="visible" [modal]="true" [style]="{ width: '520px' }" [draggable]="false">
+  <form [formGroup]="form" (ngSubmit)="save()" class="form-grid" novalidate>
+    @if (!orderId()) {
+      <div class="field field--full">
+        <label for="pay-order">Pedido <span class="req">*</span></label>
+        <app-order-picker inputId="pay-order" formControlName="order_id" (orderSelected)="setOrder($event)" />
+        <app-field-error [control]="form.controls.order_id" />
+      </div>
+    }
+
+    @if (order(); as o) {
+      <div class="amounts field--full">
+        <div><small>Total pedido</small><strong>{{ o.total | money }}</strong></div>
+        <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money }}</strong></div>
+        <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></div>
+      </div>
+    }
+
+    <div class="field">
+      <label for="pay-amount">Monto <span class="req">*</span></label>
+      <p-inputnumber inputId="pay-amount" formControlName="amount" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+      <app-field-error [control]="form.controls.amount" />
+    </div>
+    <div class="field">
+      <label for="pay-date">Fecha <span class="req">*</span></label>
+      <p-datepicker inputId="pay-date" formControlName="payment_date" dateFormat="dd/mm/yy" [maxDate]="today" [showIcon]="true" appendTo="body" [fluid]="true" />
+      <app-field-error [control]="form.controls.payment_date" />
+    </div>
+    <div class="field">
+      <label for="pay-method">Método <span class="req">*</span></label>
+      <p-select inputId="pay-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
+    </div>
+    <div class="field">
+      <label for="pay-ref">Referencia / N.° operación</label>
+      <input pInputText id="pay-ref" formControlName="reference" />
+    </div>
+    <div class="field field--full row">
+      <p-checkbox inputId="pay-advance" formControlName="is_advance" [binary]="true" />
+      <label for="pay-advance">Es un adelanto</label>
+    </div>
+    <div class="field field--full">
+      <label for="pay-notes">Observaciones</label>
+      <textarea pTextarea id="pay-notes" formControlName="notes" rows="2" [autoResize]="true"></textarea>
+    </div>
+    <div class="form-actions field--full" style="margin-top: 0.25rem">
+      <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="visible.set(false)" />
+      <p-button type="submit" label="Registrar pago" icon="pi pi-check" [loading]="saving()" />
+    </div>
+  </form>
+</p-dialog>

@@ -23,6 +23,9 @@ import { OrderAttachments } from '../../components/order-attachments/order-attac
 import { StatusDialog } from '../../components/status-dialog/status-dialog';
 import { OrderProduction } from '../../../production/components/order-production/order-production';
 import { OrderMaterials } from '../../../materials/components/order-materials/order-materials';
+import { OrderPayments } from '../../../payments/components/order-payments/order-payments';
+import { Payment } from '../../../payments/models/payment.model';
+import { PaymentsService } from '../../../payments/services/payments.service';
 
 type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 'history';
 
@@ -45,6 +48,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
     StatusDialog,
     OrderProduction,
     OrderMaterials,
+    OrderPayments,
   ],
   templateUrl: './order-detail.html',
   styleUrl: './order-detail.scss',
@@ -52,6 +56,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
 export class OrderDetailPage implements OnInit {
   private readonly service = inject(OrdersService);
   private readonly production = inject(ProductionService);
+  private readonly paymentsService = inject(PaymentsService);
   private readonly notify = inject(NotifyService);
   private readonly confirm = inject(ConfirmationService);
   private readonly router = inject(Router);
@@ -67,6 +72,13 @@ export class OrderDetailPage implements OnInit {
   protected readonly tab = signal<OrderTab>('summary');
   protected readonly statusDialog = signal(false);
   protected readonly materialDialog = signal(false);
+  protected readonly paymentDialog = signal(false);
+  protected readonly payments = signal<Payment[]>([]);
+  protected readonly advance = computed(() =>
+    this.payments()
+      .filter((p) => p.is_advance && !p.voided)
+      .reduce((acc, p) => acc + Number(p.amount), 0),
+  );
 
   protected readonly labels = ORDER_STATUS_LABELS;
   protected readonly severities = ORDER_STATUS_SEVERITY;
@@ -87,6 +99,7 @@ export class OrderDetailPage implements OnInit {
     if (this.canEdit && !this.locked()) {
       items.push({ label: 'Editar pedido', icon: 'pi pi-pencil', command: () => void this.router.navigate(['/orders', this.id(), 'edit']) });
     }
+    if (this.canSeeMoney && !this.locked()) items.push({ label: 'Registrar pago', icon: 'pi pi-wallet', command: () => this.openPayment() });
     if (!this.locked()) items.push({ label: 'Registrar material', icon: 'pi pi-box', command: () => this.openMaterial() });
     if (!this.locked()) items.push({ label: 'Subir archivo', icon: 'pi pi-upload', command: () => this.tab.set('files') });
     if (this.canChangeStatus) items.push({ label: 'Cambiar estado', icon: 'pi pi-sync', command: () => this.statusDialog.set(true) });
@@ -101,11 +114,13 @@ export class OrderDetailPage implements OnInit {
     const first = this.order() === null;
     if (first) this.loading.set(true);
     try {
-      const [order, stages, history] = await Promise.all([
+      const [order, stages, history, payments] = await Promise.all([
         this.service.get(this.id()),
         this.production.stages(this.id()),
         this.service.history(this.id()),
+        this.canSeeMoney ? this.paymentsService.byOrder(this.id()) : Promise.resolve([]),
       ]);
+      this.payments.set(payments);
       this.order.set(order);
       this.stages.set(stages);
       this.history.set(history);
@@ -125,7 +140,7 @@ export class OrderDetailPage implements OnInit {
         this.tab.set('production');
         break;
       case 'payment':
-        this.tab.set('payments');
+        this.openPayment();
         break;
       case 'delivery':
         this.tab.set('summary');
@@ -162,6 +177,11 @@ export class OrderDetailPage implements OnInit {
         }
       },
     });
+  }
+
+  protected openPayment(): void {
+    this.tab.set('payments');
+    this.paymentDialog.set(true);
   }
 
   protected openMaterial(): void {

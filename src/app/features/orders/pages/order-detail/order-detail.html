@@ -21,6 +21,9 @@
     @if (canChangeStatus) {
       <p-button label="Cambiar estado" icon="pi pi-sync" severity="secondary" [outlined]="true" (onClick)="statusDialog.set(true)" class="hide-sm" />
     }
+    @if (canSeeMoney && !locked()) {
+      <p-button label="Registrar pago" icon="pi pi-wallet" (onClick)="openPayment()" />
+    }
     @if (!locked()) {
       <p-button label="Registrar material" icon="pi pi-box" severity="secondary" [outlined]="true" (onClick)="openMaterial()" class="hide-sm" />
       <p-button label="Subir archivo" icon="pi pi-upload" severity="secondary" [outlined]="true" (onClick)="openFiles()" class="hide-sm" />
@@ -35,12 +38,15 @@
         <p-tab value="summary"><i class="pi pi-th-large"></i> Resumen</p-tab>
         <p-tab value="production"><i class="pi pi-cog"></i> Producción</p-tab>
         <p-tab value="materials"><i class="pi pi-box"></i> Materiales</p-tab>
+        @if (canSeeMoney) {
+          <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos</p-tab>
+        }
         <p-tab value="files"><i class="pi pi-paperclip"></i> Archivos</p-tab>
         <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
       </p-tablist>
       <p-tabpanels>
         <p-tabpanel value="summary">
-          <app-order-summary [order]="o" [stages]="stages()" [showMoney]="canSeeMoney" (act)="onAction($event)" />
+          <app-order-summary [order]="o" [stages]="stages()" [showMoney]="canSeeMoney" [advance]="advance()" (act)="onAction($event)" />
         </p-tabpanel>
         <p-tabpanel value="production">
           <app-order-production [order]="o" [stages]="stages()" [locked]="locked()" (changed)="load()" />
@@ -48,6 +54,11 @@
         <p-tabpanel value="materials">
           <app-order-materials [orderId]="o.id" [readonly]="locked()" [(dialog)]="materialDialog" (changed)="refreshHistory()" />
         </p-tabpanel>
+        @if (canSeeMoney) {
+          <p-tabpanel value="payments">
+            <app-order-payments [order]="o" [payments]="payments()" [readonly]="locked()" [(dialog)]="paymentDialog" (changed)="load()" />
+          </p-tabpanel>
+        }
         <p-tabpanel value="files">
           <app-order-attachments [orderId]="o.id" [readonly]="locked()" (changed)="refreshHistory()" />
         </p-tabpanel>

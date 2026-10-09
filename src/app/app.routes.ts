@@ -44,6 +44,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/materials/materials.routes').then((m) => m.MATERIALS_ROUTES),
       },
+      {
+        path: 'payments',
+        data: { breadcrumb: 'Pagos', roles: MODULE_ROLES.payments },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/payments/payments.routes').then((m) => m.PAYMENTS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },

@@ -1,0 +1,108 @@
+<app-page-header title="Pagos" subtitle="Cobros registrados y cuentas por cobrar">
+  <p-button label="Registrar pago" icon="pi pi-plus" (onClick)="dialog.set(true)" />
+</app-page-header>
+
+<div class="grid-cols grid-cols--3" style="margin-bottom: 1rem">
+  <app-stat-card label="Cobrado en el periodo" [value]="collected()" icon="pi pi-wallet" tone="green" [hint]="payments().length + ' pago(s)'" />
+  <app-stat-card label="Total por cobrar" [value]="receivableTotal()" icon="pi pi-clock" tone="red" [hint]="receivables().length + ' pedido(s) con saldo'" />
+  <div class="card" style="display: flex; flex-direction: column; gap: 0.35rem; padding: 1rem 1.1rem">
+    <small class="muted">Por método</small>
+    @for (m of byMethod(); track m.method) {
+      <div class="row row--between"><span>{{ m.method | label: methodLabels }}</span><strong class="mono">{{ m.total | money }}</strong></div>
+    } @empty {
+      <span class="muted small">Sin pagos en el periodo.</span>
+    }
+  </div>
+</div>
+
+<div class="card">
+  <p-tabs value="payments">
+    <p-tablist>
+      <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos recibidos</p-tab>
+      <p-tab value="receivables"><i class="pi pi-clock"></i> Cuentas por cobrar ({{ receivables().length }})</p-tab>
+    </p-tablist>
+    <p-tabpanels>
+      <p-tabpanel value="payments">
+        <div class="toolbar-filters">
+          <p-datepicker
+            [(ngModel)]="range"
+            selectionMode="range"
+            dateFormat="dd/mm/yy"
+            [showIcon]="true"
+            [readonlyInput]="true"
+            placeholder="Rango de fechas"
+            (onSelect)="onRange()"
+            (onClear)="load()"
+            [showClear]="true"
+          />
+          <p-select [options]="methods" [(ngModel)]="method" (onChange)="load()" optionLabel="label" optionValue="value" placeholder="Todos los métodos" [showClear]="true" [style]="{ minWidth: '180px' }" />
+          <div class="row">
+            <p-checkbox inputId="pay-voided" [(ngModel)]="includeVoided" [binary]="true" (onChange)="load()" />
+            <label for="pay-voided" class="small">Incluir anulados</label>
+          </div>
+        </div>
+        <p-table [value]="payments()" [loading]="loading()" [scrollable]="true" [tableStyle]="{ 'min-width': '820px' }" [paginator]="payments().length > 20" [rows]="20" [rowHover]="true">
+          <ng-template #header>
+            <tr>
+              <th pSortableColumn="payment_date">Fecha <p-sortIcon field="payment_date" /></th>
+              <th>Pedido</th>
+              <th>Cliente</th>
+              <th>Método</th>
+              <th>Referencia</th>
+              <th class="text-right" pSortableColumn="amount">Monto <p-sortIcon field="amount" /></th>
+            </tr>
+          </ng-template>
+          <ng-template #body let-p>
+            <tr class="p-datatable-row-clickable" (click)="openOrder(p.order_id)" [style.opacity]="p.voided ? 0.55 : 1">
+              <td class="nowrap">{{ p.payment_date | date: 'dd/MM/yyyy' }}</td>
+              <td class="strong nowrap">{{ p.order?.number }}</td>
+              <td>{{ p.order?.customer?.full_name }}</td>
+              <td class="nowrap">
+                {{ p.method | label: methodLabels }}
+                @if (p.is_advance) {
+                  <p-tag value="Adelanto" severity="info" />
+                }
+                @if (p.voided) {
+                  <p-tag value="Anulado" severity="danger" />
+                }
+              </td>
+              <td>{{ p.reference || '—' }}</td>
+              <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money }}</td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="6"><app-empty-state icon="pi pi-wallet" message="Sin pagos en el periodo seleccionado." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+
+      <p-tabpanel value="receivables">
+        <p-table [value]="receivables()" [loading]="loading()" [scrollable]="true" [tableStyle]="{ 'min-width': '860px' }" [rowHover]="true">
+          <ng-template #header>
+            <tr>
+              <th>Pedido</th><th>Cliente</th><th>Producto</th><th>Estado</th><th>Entrega</th>
+              <th class="text-right">Total</th><th class="text-right">Pagado</th><th class="text-right" pSortableColumn="balance">Saldo <p-sortIcon field="balance" /></th>
+            </tr>
+          </ng-template>
+          <ng-template #body let-o>
+            <tr class="p-datatable-row-clickable" [routerLink]="['/orders', o.id]">
+              <td class="strong nowrap">{{ o.number }}</td>
+              <td>{{ o.customer?.full_name }}</td>
+              <td>{{ o.title }}</td>
+              <td class="nowrap"><app-status-tag [value]="o.status" [labels]="orderLabels" [severities]="orderSeverity" /></td>
+              <td class="nowrap" [class.text-danger]="overdue(o)">{{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : '—' }}</td>
+              <td class="text-right mono nowrap">{{ o.total | money }}</td>
+              <td class="text-right mono nowrap">{{ o.amount_paid | money }}</td>
+              <td class="text-right mono nowrap strong text-danger">{{ o.balance | money }}</td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="8"><app-empty-state icon="pi pi-check-circle" message="No hay saldos pendientes." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+    </p-tabpanels>
+  </p-tabs>
+</div>
+
+<app-payment-dialog [(visible)]="dialog" (saved)="load()" />

@@ -244,6 +244,26 @@ a {
   width: 100%;
 }
 
+/* Resumen de montos (total / pagado / saldo) en diálogos */
+.amounts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  padding: 0.75rem;
+  background: var(--p-surface-50);
+  border-radius: 0.5rem;
+}
+
+.amounts > div {
+  display: flex;
+  flex-direction: column;
+}
+
+.amounts small {
+  color: var(--p-surface-500);
+  font-size: 0.75rem;
+}
+
 /* ---------- Tablas ---------- */
 .p-datatable .p-datatable-thead > tr > th {
   font-size: 0.78rem;
