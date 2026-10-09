@@ -21,6 +21,7 @@ import { ProductionService } from '../../../production/services/production.servi
 import { OrderAction, OrderSummary } from '../../components/order-summary/order-summary';
 import { OrderAttachments } from '../../components/order-attachments/order-attachments';
 import { StatusDialog } from '../../components/status-dialog/status-dialog';
+import { OrderProduction } from '../../../production/components/order-production/order-production';
 
 type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 'history';
 
@@ -41,6 +42,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
     OrderSummary,
     OrderAttachments,
     StatusDialog,
+    OrderProduction,
   ],
   templateUrl: './order-detail.html',
   styleUrl: './order-detail.scss',

@@ -1,0 +1,82 @@
+<app-page-header title="Producción" subtitle="Arrastre las tarjetas entre columnas para actualizar el estado de cada etapa">
+  <p-button label="Actualizar" icon="pi pi-refresh" severity="secondary" [outlined]="true" [loading]="loading()" (onClick)="load()" />
+</app-page-header>
+
+<div class="card filters">
+  <div class="toolbar-filters" style="margin: 0">
+    <p-select
+      [options]="lookups.activeStaff()"
+      [(ngModel)]="assignedTo"
+      (onChange)="load()"
+      optionLabel="full_name"
+      optionValue="id"
+      placeholder="Todos los responsables"
+      [showClear]="true"
+      [style]="{ minWidth: '200px' }"
+    />
+    <p-select
+      [options]="stageNames()"
+      [(ngModel)]="stageName"
+      (onChange)="load()"
+      optionLabel="label"
+      optionValue="value"
+      placeholder="Todas las etapas"
+      [showClear]="true"
+      [style]="{ minWidth: '180px' }"
+    />
+    <div class="row">
+      <p-checkbox inputId="only-current" [(ngModel)]="onlyCurrent" [binary]="true" (onChange)="load()" />
+      <label for="only-current" class="small">Solo etapa actual (y completadas en los últimos 7 días)</label>
+    </div>
+  </div>
+</div>
+
+@if (loading() && stages().length === 0) {
+  <div class="board">
+    @for (c of columns; track c.status) {
+      <p-skeleton height="22rem" />
+    }
+  </div>
+} @else {
+  <div class="board" cdkDropListGroup>
+    @for (c of columns; track c.status) {
+      <section class="column" [attr.data-status]="c.status">
+        <header class="column__head">
+          <span><i [class]="c.icon"></i> {{ c.label }}</span>
+          <span class="column__count">{{ byStatus()[c.status].length }}</span>
+        </header>
+        <div class="column__list" cdkDropList [cdkDropListData]="c.status" (cdkDropListDropped)="drop($event)">
+          @for (s of byStatus()[c.status]; track s.id) {
+            <article class="kcard" cdkDrag [cdkDragData]="s" [cdkDragDisabled]="!canMove(s)" [class.kcard--locked]="!canMove(s)">
+              <div class="kcard__top">
+                <a class="link" [routerLink]="['/orders', s.order.id]">{{ s.order.number }}</a>
+                @if (s.order.priority === 'URGENTE' || s.order.priority === 'ALTA') {
+                  <app-status-tag [value]="s.order.priority" [labels]="priorityLabels" [severities]="prioritySeverity" />
+                }
+                @if (canMove(s)) {
+                  <p-button icon="pi pi-ellipsis-h" [text]="true" size="small" severity="secondary" ariaLabel="Mover" (onClick)="cardMenu.toggle($event)" class="kcard__menu" />
+                  <p-menu #cardMenu [model]="menuFor(s)" [popup]="true" appendTo="body" />
+                }
+              </div>
+              <strong class="kcard__stage">{{ s.name }}</strong>
+              <p class="kcard__title">{{ s.order.title }}</p>
+              <small class="muted">{{ s.order.customer?.full_name }}</small>
+              <p-progressbar [value]="s.order.progress" [showValue]="false" [style]="{ height: '0.35rem', margin: '0.5rem 0 0.4rem' }" />
+              <div class="kcard__foot">
+                <span><i class="pi pi-user"></i> {{ s.assignee?.full_name ?? 'Sin asignar' }}</span>
+                @if (s.order.due_date) {
+                  <span [class.text-danger]="isOverdue(s)"><i class="pi pi-calendar"></i> {{ s.order.due_date | date: 'dd/MM' }}</span>
+                }
+              </div>
+              @if (s.notes) {
+                <small class="kcard__notes"><i class="pi pi-comment"></i> {{ s.notes }}</small>
+              }
+            </article>
+          } @empty {
+            <p class="column__empty">Sin etapas</p>
+          }
+        </div>
+      </section>
+    }
+  </div>
+}

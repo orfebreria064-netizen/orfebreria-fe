@@ -32,12 +32,16 @@
     <p-tabs [(value)]="tab" [scrollable]="true">
       <p-tablist>
         <p-tab value="summary"><i class="pi pi-th-large"></i> Resumen</p-tab>
+        <p-tab value="production"><i class="pi pi-cog"></i> Producción</p-tab>
         <p-tab value="files"><i class="pi pi-paperclip"></i> Archivos</p-tab>
         <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
       </p-tablist>
       <p-tabpanels>
         <p-tabpanel value="summary">
           <app-order-summary [order]="o" [stages]="stages()" [showMoney]="canSeeMoney" (act)="onAction($event)" />
+        </p-tabpanel>
+        <p-tabpanel value="production">
+          <app-order-production [order]="o" [stages]="stages()" [locked]="locked()" (changed)="load()" />
         </p-tabpanel>
         <p-tabpanel value="files">
           <app-order-attachments [orderId]="o.id" [readonly]="locked()" (changed)="refreshAfterFiles()" />

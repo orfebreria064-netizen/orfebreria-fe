@@ -1,0 +1,110 @@
+@if (stages().length === 0) {
+  <app-empty-state icon="pi pi-cog" message="Este pedido aún no tiene etapas de producción.">
+    @if (canManage && !locked()) {
+      <div class="row" style="justify-content: center">
+        <p-button label="Generar etapas desde la plantilla" icon="pi pi-bolt" [loading]="busy()" (onClick)="generate()" />
+        <p-button label="Agregar etapa manual" icon="pi pi-plus" severity="secondary" [outlined]="true" (onClick)="openNew()" />
+      </div>
+    }
+  </app-empty-state>
+} @else {
+  <div class="progress-head">
+    <div>
+      <strong>Etapa actual: {{ order().current_stage_name ?? 'Producción completada' }}</strong>
+      <span class="muted"> · Avance: {{ order().progress }}% ({{ completed() }}/{{ stages().length }} etapas)</span>
+    </div>
+    @if (canManage && !locked()) {
+      <p-button label="Agregar etapa" icon="pi pi-plus" size="small" [text]="true" (onClick)="openNew()" />
+    }
+  </div>
+  <p-progressbar [value]="order().progress" [style]="{ height: '0.6rem' }" [showValue]="false" />
+
+  <ol class="stages">
+    @for (s of stages(); track s.id) {
+      <li class="stage" [class.stage--current]="s.is_current" [attr.data-status]="s.status">
+        <span class="stage__index">{{ $index + 1 }}</span>
+        <div class="stage__main">
+          <div class="stage__title">
+            <strong>{{ s.name }}</strong>
+            @if (s.is_quality_check) {
+              <p-tag value="Control de calidad" severity="info" />
+            }
+            @if (s.is_current) {
+              <p-tag value="Actual" severity="warn" />
+            }
+          </div>
+          <small class="muted">
+            @if (s.started_at) {
+              Inicio: {{ s.started_at | date: 'dd/MM/yyyy HH:mm' }}
+            }
+            @if (s.completed_at) {
+              · Fin: {{ s.completed_at | date: 'dd/MM/yyyy HH:mm' }}
+            }
+          </small>
+          @if (s.notes) {
+            <p class="stage__notes"><i class="pi pi-comment"></i> {{ s.notes }}</p>
+          }
+        </div>
+        <div class="stage__controls">
+          @if (canUpdate(s)) {
+            <p-select
+              [options]="statusOptions"
+              [ngModel]="s.status"
+              (ngModelChange)="setStatus(s, $event)"
+              optionLabel="label"
+              optionValue="value"
+              appendTo="body"
+              [style]="{ width: '150px' }"
+            />
+          } @else {
+            <app-status-tag [value]="s.status" [labels]="statusLabels" [severities]="statusSeverity" />
+          }
+          @if (canManage && !locked()) {
+            <p-select
+              [options]="lookups.activeStaff()"
+              [ngModel]="s.assigned_to"
+              (ngModelChange)="assign(s, $event)"
+              optionLabel="full_name"
+              optionValue="id"
+              placeholder="Responsable"
+              [showClear]="true"
+              appendTo="body"
+              [style]="{ width: '170px' }"
+            />
+          } @else {
+            <span class="small muted"><i class="pi pi-user"></i> {{ s.assignee?.full_name ?? 'Sin asignar' }}</span>
+          }
+          @if (canUpdate(s)) {
+            <p-button icon="pi pi-comment" [text]="true" severity="secondary" ariaLabel="Observaciones" (onClick)="openNotes(s)" />
+          }
+          @if (canManage && !locked()) {
+            <p-button icon="pi pi-trash" [text]="true" severity="danger" ariaLabel="Eliminar etapa" (onClick)="remove(s)" />
+          }
+        </div>
+      </li>
+    }
+  </ol>
+}
+
+<p-dialog [header]="editing ? 'Etapa: ' + editing.name : 'Nueva etapa'" [(visible)]="dialog" [modal]="true" [style]="{ width: '460px' }" [draggable]="false">
+  <div class="stack">
+    <div class="field">
+      <label for="stage-name">Nombre</label>
+      <input pInputText id="stage-name" [(ngModel)]="stageName" [disabled]="!!editing && !canManage" />
+    </div>
+    @if (!editing) {
+      <div class="row">
+        <p-checkbox inputId="stage-qc" [(ngModel)]="stageIsQc" [binary]="true" />
+        <label for="stage-qc">Es una etapa de control de calidad</label>
+      </div>
+    }
+    <div class="field">
+      <label for="stage-notes">Observaciones</label>
+      <textarea pTextarea id="stage-notes" [(ngModel)]="stageNotes" rows="4" [autoResize]="true"></textarea>
+    </div>
+  </div>
+  <ng-template #footer>
+    <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="dialog.set(false)" />
+    <p-button label="Guardar" icon="pi pi-check" [loading]="busy()" (onClick)="saveStage()" />
+  </ng-template>
+</p-dialog>
