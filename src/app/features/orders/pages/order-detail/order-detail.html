@@ -22,6 +22,7 @@
       <p-button label="Cambiar estado" icon="pi pi-sync" severity="secondary" [outlined]="true" (onClick)="statusDialog.set(true)" class="hide-sm" />
     }
     @if (!locked()) {
+      <p-button label="Registrar material" icon="pi pi-box" severity="secondary" [outlined]="true" (onClick)="openMaterial()" class="hide-sm" />
       <p-button label="Subir archivo" icon="pi pi-upload" severity="secondary" [outlined]="true" (onClick)="openFiles()" class="hide-sm" />
     }
     <p-button icon="pi pi-ellipsis-v" severity="secondary" [outlined]="true" ariaLabel="Más acciones" (onClick)="menu.toggle($event)" class="show-sm" />
@@ -33,6 +34,7 @@
       <p-tablist>
         <p-tab value="summary"><i class="pi pi-th-large"></i> Resumen</p-tab>
         <p-tab value="production"><i class="pi pi-cog"></i> Producción</p-tab>
+        <p-tab value="materials"><i class="pi pi-box"></i> Materiales</p-tab>
         <p-tab value="files"><i class="pi pi-paperclip"></i> Archivos</p-tab>
         <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
       </p-tablist>
@@ -43,8 +45,11 @@
         <p-tabpanel value="production">
           <app-order-production [order]="o" [stages]="stages()" [locked]="locked()" (changed)="load()" />
         </p-tabpanel>
+        <p-tabpanel value="materials">
+          <app-order-materials [orderId]="o.id" [readonly]="locked()" [(dialog)]="materialDialog" (changed)="refreshHistory()" />
+        </p-tabpanel>
         <p-tabpanel value="files">
-          <app-order-attachments [orderId]="o.id" [readonly]="locked()" (changed)="refreshAfterFiles()" />
+          <app-order-attachments [orderId]="o.id" [readonly]="locked()" (changed)="refreshHistory()" />
         </p-tabpanel>
         <p-tabpanel value="history">
           <app-history-timeline [items]="history()" />

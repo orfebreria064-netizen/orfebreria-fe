@@ -1,0 +1,96 @@
+<p-dialog header="Registrar movimiento de material" [(visible)]="visible" [modal]="true" [style]="{ width: '560px' }" [draggable]="false">
+  <form [formGroup]="form" (ngSubmit)="save()" class="form-grid" novalidate>
+    <div class="field field--full">
+      <label>¿A quién pertenece el material?</label>
+      <p-selectbutton [options]="ownershipOptions" formControlName="ownership" optionLabel="label" optionValue="value" [allowEmpty]="false" />
+      @if (form.controls.ownership.value === 'CLIENTE') {
+        <small class="muted">El material del cliente no afecta el stock de la empresa; se controla su saldo por pedido.</small>
+      }
+    </div>
+
+    <div class="field">
+      <label for="mv-type">Tipo de movimiento <span class="req">*</span></label>
+      <p-select inputId="mv-type" [options]="typeOptions()" formControlName="movement_type" optionLabel="label" optionValue="value" appendTo="body" />
+    </div>
+    <div class="field">
+      <label for="mv-date">Fecha <span class="req">*</span></label>
+      <p-datepicker inputId="mv-date" formControlName="movement_date" dateFormat="dd/mm/yy" [showIcon]="true" appendTo="body" [fluid]="true" />
+      <app-field-error [control]="form.controls.movement_date" />
+    </div>
+
+    <div class="field field--full">
+      <label for="mv-material">Material <span class="req">*</span></label>
+      <p-select
+        inputId="mv-material"
+        [options]="materials()"
+        formControlName="material_id"
+        optionValue="id"
+        optionLabel="name"
+        [filter]="true"
+        filterBy="name"
+        placeholder="Seleccione"
+        appendTo="body"
+      >
+        <ng-template #item let-m>{{ materialLabel(m) }}</ng-template>
+      </p-select>
+      <app-field-error [control]="form.controls.material_id" />
+    </div>
+
+    @if (!orderId() && needsOrder()) {
+      <div class="field field--full">
+        <label for="mv-order">Pedido <span class="req">*</span></label>
+        <app-order-picker inputId="mv-order" formControlName="order_id" (orderSelected)="onOrderSelected($event?.id ?? null)" />
+        <app-field-error [control]="form.controls.order_id" />
+      </div>
+    }
+
+    @if (form.controls.movement_type.value === 'AJUSTE') {
+      <div class="field field--full">
+        <label>Sentido del ajuste</label>
+        <p-selectbutton [options]="signOptions" [ngModel]="adjustSign()" (ngModelChange)="adjustSign.set($event)" [ngModelOptions]="{ standalone: true }" optionLabel="label" optionValue="value" [allowEmpty]="false" />
+      </div>
+    }
+
+    <div class="field">
+      <label for="mv-qty">Cantidad / peso <span class="req">*</span></label>
+      <p-inputnumber
+        inputId="mv-qty"
+        formControlName="quantity"
+        [minFractionDigits]="2"
+        [maxFractionDigits]="3"
+        [min]="0"
+        [suffix]="material() ? ' ' + material()!.unit : ''"
+        locale="es-PE"
+        [fluid]="true"
+      />
+      <app-field-error [control]="form.controls.quantity" />
+    </div>
+    <div class="field">
+      <label for="mv-cost">Costo unitario (opcional)</label>
+      <p-inputnumber inputId="mv-cost" formControlName="unit_cost" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+    </div>
+
+    @if (material(); as m) {
+      <div class="field--full small muted">
+        Stock de la empresa: <strong>{{ m.stock | qty: m.unit }}</strong>
+        @if (clientBalance(); as b) {
+          · Material del cliente en este pedido: recibido {{ b.received | qty: b.unit }}, usado {{ b.used | qty: b.unit }},
+          saldo <strong>{{ b.balance | qty: b.unit }}</strong>
+        }
+      </div>
+    }
+    @if (availabilityWarning(); as w) {
+      <p-message class="field--full" severity="warn" [text]="w" />
+    }
+
+    <div class="field field--full">
+      <label for="mv-notes">Observaciones</label>
+      <textarea pTextarea id="mv-notes" formControlName="notes" rows="2" [autoResize]="true"></textarea>
+    </div>
+
+    <div class="form-actions field--full" style="margin-top: 0.25rem">
+      <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="visible.set(false)" />
+      <p-button type="submit" label="Registrar" icon="pi pi-check" [loading]="saving()" />
+    </div>
+  </form>
+</p-dialog>

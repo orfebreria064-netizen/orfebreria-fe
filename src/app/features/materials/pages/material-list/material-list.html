@@ -1,0 +1,85 @@
+<app-page-header title="Materiales" subtitle="Metales, piedras e insumos: stock y movimientos">
+  <p-button label="Registrar movimiento" icon="pi pi-arrow-right-arrow-left" severity="secondary" [outlined]="true" (onClick)="movementDialog.set(true)" />
+  @if (canWrite) {
+    <p-button label="Nuevo material" icon="pi pi-plus" (onClick)="openNew()" />
+  }
+</app-page-header>
+
+<div class="grid-cols grid-cols--3" style="margin-bottom: 1rem">
+  <app-stat-card label="Materiales activos" [value]="materials().length" icon="pi pi-box" tone="ink" />
+  <app-stat-card label="Metal en stock" [value]="metalGrams() + ' g'" icon="pi pi-database" tone="gold" />
+  <app-stat-card
+    label="Bajo stock mínimo"
+    [value]="lowStock().length"
+    icon="pi pi-exclamation-triangle"
+    [tone]="lowStock().length ? 'red' : 'green'"
+    [hint]="'Valor referencial del inventario: ' + inventoryValue()"
+  />
+</div>
+
+<div class="card">
+  <p-tabs value="stock">
+    <p-tablist>
+      <p-tab value="stock"><i class="pi pi-box"></i> Inventario</p-tab>
+      <p-tab value="movements"><i class="pi pi-arrow-right-arrow-left"></i> Movimientos</p-tab>
+    </p-tablist>
+    <p-tabpanels>
+      <p-tabpanel value="stock">
+        <div class="toolbar-filters">
+          <p-select [options]="typeOptions" [(ngModel)]="type" (onChange)="load()" optionLabel="label" optionValue="value" placeholder="Todos los tipos" [showClear]="true" [style]="{ minWidth: '200px' }" />
+          <div class="row">
+            <p-checkbox inputId="mat-inactive" [(ngModel)]="includeInactive" [binary]="true" (onChange)="load()" />
+            <label for="mat-inactive" class="small">Mostrar inactivos</label>
+          </div>
+        </div>
+        <p-table [value]="materials()" [loading]="loading()" [scrollable]="true" [tableStyle]="{ 'min-width': '760px' }" [rowHover]="true">
+          <ng-template #header>
+            <tr>
+              <th pSortableColumn="name">Material <p-sortIcon field="name" /></th>
+              <th>Tipo</th>
+              <th>Ley</th>
+              <th class="text-right" pSortableColumn="stock">Stock <p-sortIcon field="stock" /></th>
+              <th class="text-right">Mínimo</th>
+              <th class="text-right">Costo ref.</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </ng-template>
+          <ng-template #body let-m>
+            <tr class="p-datatable-row-clickable" (click)="open(m)">
+              <td class="strong">{{ m.name }}</td>
+              <td>{{ m.type | label: typeLabels }}</td>
+              <td>{{ m.purity || '—' }}</td>
+              <td class="text-right mono nowrap" [class.text-danger]="isLow(m)">
+                {{ m.stock | qty: m.unit }}
+                @if (isLow(m)) {
+                  <i class="pi pi-exclamation-triangle" title="Bajo stock mínimo"></i>
+                }
+              </td>
+              <td class="text-right mono nowrap muted">{{ m.min_stock | qty: m.unit }}</td>
+              <td class="text-right mono nowrap">{{ m.reference_cost | money }} / {{ m.unit }}</td>
+              <td><p-tag [value]="m.active ? 'Activo' : 'Inactivo'" [severity]="m.active ? 'success' : 'secondary'" /></td>
+              <td class="text-right">
+                @if (canWrite) {
+                  <p-button icon="pi pi-pencil" [text]="true" severity="secondary" ariaLabel="Editar" (onClick)="edit(m, $event)" />
+                }
+              </td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="8"><app-empty-state icon="pi pi-box" message="No hay materiales registrados." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+      <p-tabpanel value="movements">
+        <div class="toolbar-filters">
+          <p-select [options]="movementTypes" [(ngModel)]="movementType" (onChange)="loadMovements()" optionLabel="label" optionValue="value" placeholder="Todos los movimientos" [showClear]="true" [style]="{ minWidth: '220px' }" />
+        </div>
+        <app-movements-table [movements]="movements()" [loading]="loadingMovements()" />
+      </p-tabpanel>
+    </p-tabpanels>
+  </p-tabs>
+</div>
+
+<app-material-dialog [(visible)]="materialDialog" [material]="editing()" (saved)="load()" />
+<app-movement-dialog [(visible)]="movementDialog" (saved)="afterMovement()" />

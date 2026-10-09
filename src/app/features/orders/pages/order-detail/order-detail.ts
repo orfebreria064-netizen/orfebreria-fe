@@ -22,6 +22,7 @@ import { OrderAction, OrderSummary } from '../../components/order-summary/order-
 import { OrderAttachments } from '../../components/order-attachments/order-attachments';
 import { StatusDialog } from '../../components/status-dialog/status-dialog';
 import { OrderProduction } from '../../../production/components/order-production/order-production';
+import { OrderMaterials } from '../../../materials/components/order-materials/order-materials';
 
 type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 'history';
 
@@ -43,6 +44,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
     OrderAttachments,
     StatusDialog,
     OrderProduction,
+    OrderMaterials,
   ],
   templateUrl: './order-detail.html',
   styleUrl: './order-detail.scss',
@@ -64,6 +66,7 @@ export class OrderDetailPage implements OnInit {
   protected readonly loading = signal(true);
   protected readonly tab = signal<OrderTab>('summary');
   protected readonly statusDialog = signal(false);
+  protected readonly materialDialog = signal(false);
 
   protected readonly labels = ORDER_STATUS_LABELS;
   protected readonly severities = ORDER_STATUS_SEVERITY;
@@ -84,6 +87,7 @@ export class OrderDetailPage implements OnInit {
     if (this.canEdit && !this.locked()) {
       items.push({ label: 'Editar pedido', icon: 'pi pi-pencil', command: () => void this.router.navigate(['/orders', this.id(), 'edit']) });
     }
+    if (!this.locked()) items.push({ label: 'Registrar material', icon: 'pi pi-box', command: () => this.openMaterial() });
     if (!this.locked()) items.push({ label: 'Subir archivo', icon: 'pi pi-upload', command: () => this.tab.set('files') });
     if (this.canChangeStatus) items.push({ label: 'Cambiar estado', icon: 'pi pi-sync', command: () => this.statusDialog.set(true) });
     return items;
@@ -160,7 +164,12 @@ export class OrderDetailPage implements OnInit {
     });
   }
 
-  protected async refreshAfterFiles(): Promise<void> {
+  protected openMaterial(): void {
+    this.tab.set('materials');
+    this.materialDialog.set(true);
+  }
+
+  protected async refreshHistory(): Promise<void> {
     this.history.set(await this.service.history(this.id()));
   }
 

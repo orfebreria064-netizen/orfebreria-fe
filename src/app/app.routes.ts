@@ -38,6 +38,12 @@ export const routes: Routes = [
         canActivate: [roleGuard],
         loadChildren: () => import('./features/production/production.routes').then((m) => m.PRODUCTION_ROUTES),
       },
+      {
+        path: 'materials',
+        data: { breadcrumb: 'Materiales', roles: MODULE_ROLES.materials },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/materials/materials.routes').then((m) => m.MATERIALS_ROUTES),
+      },
     ],
   },
   { path: '**', redirectTo: '' },
