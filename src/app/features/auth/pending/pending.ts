@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { AuthService } from '../../../core/auth/auth.service';
 
-/** Cuenta registrada pero aún no activada por un administrador. */
+/** Usuario desactivado por el administrador de su empresa. */
 @Component({
   selector: 'app-pending',
   imports: [ButtonModule],
@@ -12,13 +12,13 @@ import { AuthService } from '../../../core/auth/auth.service';
       <div class="auth-brand">
         <span>Au</span>
         <div>
-          <h1>Cuenta pendiente de activación</h1>
+          <h1>Usuario inactivo</h1>
           <p>{{ auth.session()?.user?.email }}</p>
         </div>
       </div>
       <p>
-        Su cuenta fue creada correctamente. Un administrador debe activarla y asignarle un rol antes de que pueda
-        acceder al sistema.
+        Su usuario está desactivado. Pida al administrador de su empresa que lo active desde
+        <strong>Configuración → Usuarios</strong>.
       </p>
       <div class="row" style="margin-top: 1.25rem">
         <p-button label="Volver a verificar" icon="pi pi-refresh" [loading]="checking()" (onClick)="check()" />

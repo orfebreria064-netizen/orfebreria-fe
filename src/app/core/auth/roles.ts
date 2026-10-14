@@ -19,6 +19,7 @@ export const MODULE_ROLES = {
   payments: ['ADMIN', 'GERENTE', 'VENDEDOR'],
   paymentsVoid: ['ADMIN', 'GERENTE'],
   deliveries: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
+  reports: ['ADMIN', 'GERENTE'],
   settings: ['ADMIN'],
 } as const satisfies Record<string, readonly AppRole[]>;
 

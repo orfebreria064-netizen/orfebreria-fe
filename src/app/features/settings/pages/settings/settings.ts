@@ -1,6 +1,7 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { TabsModule } from 'primeng/tabs';
 import { TableModule } from 'primeng/table';
@@ -12,22 +13,39 @@ import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { CheckboxModule } from 'primeng/checkbox';
 import { TagModule } from 'primeng/tag';
 import { MessageModule } from 'primeng/message';
+import { DialogModule } from 'primeng/dialog';
+import { ProgressBarModule } from 'primeng/progressbar';
 import { AuthService } from '../../../../core/auth/auth.service';
 import { AppRole, ROLE_LABELS, ROLE_OPTIONS } from '../../../../core/models/domain';
 import { ProductionStageTemplate, ServiceType } from '../../../../core/models/catalog.model';
 import { Profile } from '../../../../core/models/profile.model';
 import { LookupService } from '../../../../core/services/lookup.service';
 import { NotifyService } from '../../../../core/services/notify.service';
+import { InvitationsService } from '../../../../core/services/invitations.service';
+import {
+  ACCESS_STATE_LABELS,
+  ACCESS_STATE_SEVERITY,
+  Invitation,
+  Plan,
+  SAAS_PAYMENT_METHOD_LABELS,
+  SubscriptionPayment,
+} from '../../../../core/models/subscription.model';
+import { PLATFORM, whatsappLink } from '../../../../core/config/platform';
+import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { PageHeader } from '../../../../shared/components/page-header/page-header';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { phoneValidator } from '../../../../shared/utils/validators';
 import { SettingsService } from '../../services/settings.service';
 
-/** Configuración básica: empresa, usuarios y roles, plantilla de etapas, tipos de servicio. */
+/** Configuración: empresa, usuarios (invitaciones y cupos del plan), etapas, tipos de servicio y Mi plan. */
 @Component({
   selector: 'app-settings',
   imports: [
     DatePipe,
+    MoneyPipe,
+    RouterLink,
+    DialogModule,
+    ProgressBarModule,
     FormsModule,
     ReactiveFormsModule,
     ButtonModule,
@@ -45,12 +63,44 @@ import { SettingsService } from '../../services/settings.service';
     FieldError,
   ],
   templateUrl: './settings.html',
+  styleUrl: './settings.scss',
 })
 export class Settings implements OnInit {
   private readonly service = inject(SettingsService);
   private readonly lookups = inject(LookupService);
   private readonly notify = inject(NotifyService);
+  private readonly invitationsService = inject(InvitationsService);
   protected readonly auth = inject(AuthService);
+
+  /** Pestaña inicial (?tab=plan desde el aviso de vencimiento). */
+  readonly tab = input<string>();
+
+  protected readonly invitations = signal<Invitation[]>([]);
+  protected readonly plans = signal<Plan[]>([]);
+  protected readonly payments = signal<SubscriptionPayment[]>([]);
+  protected readonly stateLabels = ACCESS_STATE_LABELS;
+  protected readonly stateSeverity = ACCESS_STATE_SEVERITY;
+  protected readonly methodLabels = SAAS_PAYMENT_METHOD_LABELS;
+  protected readonly platform = PLATFORM;
+  protected readonly seatsFull = computed(() => {
+    const s = this.auth.subscription();
+    return !!s && s.seats_used >= s.seat_limit;
+  });
+  protected readonly seatPct = computed(() => {
+    const s = this.auth.subscription();
+    return s ? Math.min(100, Math.round((s.seats_used / s.seat_limit) * 100)) : 0;
+  });
+  protected readonly whatsappPay = computed(() =>
+    whatsappLink(`Hola, envío la constancia de pago del plan de ${this.lookups.settings()?.company_name ?? 'mi empresa'}.`),
+  );
+
+  protected inviteVisible = false;
+  protected readonly inviting = signal(false);
+  protected readonly inviteForm = inject(FormBuilder).nonNullable.group({
+    full_name: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(120)]],
+    email: ['', [Validators.required, Validators.email]],
+    role: ['VENDEDOR' as AppRole, [Validators.required]],
+  });
 
   protected readonly users = signal<Profile[]>([]);
   protected readonly stages = signal<ProductionStageTemplate[]>([]);
@@ -92,7 +142,17 @@ export class Settings implements OnInit {
       }
       this.stages.set(this.lookups.stageTemplates());
       this.serviceTypes.set(this.lookups.serviceTypes());
-      this.users.set(await this.service.users());
+      const [users, invitations, plans, payments] = await Promise.all([
+        this.service.users(),
+        this.invitationsService.list(),
+        this.service.plans(),
+        this.service.subscriptionPayments(),
+        this.auth.refreshSubscription(),
+      ]);
+      this.users.set(users);
+      this.invitations.set(invitations);
+      this.plans.set(plans);
+      this.payments.set(payments);
     } catch (err) {
       this.notify.error(err, 'No se pudo cargar la configuración.');
     }
@@ -126,15 +186,77 @@ export class Settings implements OnInit {
   async updateUser(u: Profile, patch: { role?: AppRole; active?: boolean }): Promise<void> {
     try {
       await this.service.updateUser(u.id, patch);
-      this.users.set(await this.service.users());
+      await this.reloadUsers();
       await this.lookups.reload();
       this.notify.success(
         patch.active === true ? `${u.full_name} fue activado.` : patch.active === false ? `${u.full_name} fue desactivado.` : 'Rol actualizado.',
       );
     } catch (err) {
       this.notify.error(err, 'No se pudo actualizar el usuario.');
-      this.users.set(await this.service.users());
+      await this.reloadUsers();
     }
+  }
+
+  protected roleLabel(role: AppRole): string {
+    return this.roleLabels[role] ?? role;
+  }
+
+  protected methodLabel(method: SubscriptionPayment['method']): string {
+    return this.methodLabels[method] ?? method;
+  }
+
+  protected openInvite(): void {
+    this.inviteForm.reset({ full_name: '', email: '', role: 'VENDEDOR' });
+    this.inviteVisible = true;
+  }
+
+  async sendInvite(): Promise<void> {
+    if (this.inviteForm.invalid) {
+      this.inviteForm.markAllAsTouched();
+      return;
+    }
+    const { full_name, email, role } = this.inviteForm.getRawValue();
+    this.inviting.set(true);
+    try {
+      await this.invitationsService.invite(email.trim(), full_name.trim(), role);
+      this.inviteVisible = false;
+      this.notify.success(`Se envió la invitación a ${email.trim()}.`);
+    } catch (err) {
+      this.notify.error(err, 'No se pudo invitar al usuario.');
+    } finally {
+      this.inviting.set(false);
+      await this.reloadUsers();
+    }
+  }
+
+  async resendInvitation(inv: Invitation): Promise<void> {
+    try {
+      await this.invitationsService.send(inv.id);
+      this.notify.success(`Invitación reenviada a ${inv.email}.`);
+    } catch (err) {
+      this.notify.error(err, 'No se pudo reenviar la invitación.');
+    }
+    await this.reloadUsers();
+  }
+
+  async revokeInvitation(inv: Invitation): Promise<void> {
+    try {
+      await this.invitationsService.revoke(inv.id);
+      this.notify.success('Invitación cancelada.');
+    } catch (err) {
+      this.notify.error(err, 'No se pudo cancelar la invitación.');
+    }
+    await this.reloadUsers();
+  }
+
+  private async reloadUsers(): Promise<void> {
+    const [users, invitations] = await Promise.all([
+      this.service.users(),
+      this.invitationsService.list(),
+      this.auth.refreshSubscription(),
+    ]);
+    this.users.set(users);
+    this.invitations.set(invitations);
   }
 
   // ------------------------------------------------------------ Etapas

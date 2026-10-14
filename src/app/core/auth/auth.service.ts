@@ -5,15 +5,17 @@ import { SupabaseService } from '../services/supabase.service';
 import { LookupService } from '../services/lookup.service';
 import { Profile } from '../models/profile.model';
 import { AppRole } from '../models/domain';
+import { MySubscription } from '../models/subscription.model';
 import { AppError, unwrap } from '../../shared/utils/db';
 
 const AUTH_MESSAGES: Record<string, string> = {
   'Invalid login credentials': 'Correo o contraseña incorrectos.',
   'Email not confirmed': 'Debe confirmar su correo electrónico antes de ingresar.',
   'User already registered': 'Ya existe una cuenta con ese correo.',
+  'New password should be different from the old password.': 'La nueva contraseña debe ser distinta de la anterior.',
 };
 
-/** Sesión y perfil del usuario actual (signals). */
+/** Sesión, perfil, plan de la empresa y rol de plataforma del usuario actual (signals). */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly supabase = inject(SupabaseService).client;
@@ -22,11 +24,17 @@ export class AuthService {
 
   readonly session = signal<Session | null>(null);
   readonly profile = signal<Profile | null>(null);
+  readonly subscription = signal<MySubscription | null>(null);
+  readonly isPlatformAdmin = signal(false);
 
   readonly isAuthenticated = computed(() => this.session() !== null);
   readonly isActive = computed(() => this.profile()?.active === true);
   readonly role = computed<AppRole | null>(() => (this.profile()?.active ? this.profile()!.role : null));
   readonly userName = computed(() => this.profile()?.full_name ?? this.session()?.user.email ?? '');
+  /** Suspendida o cancelada por la plataforma: sin acceso a los datos. */
+  readonly isBlocked = computed(() => ['SUSPENDED', 'CANCELLED'].includes(this.subscription()?.state ?? ''));
+  /** Vencida: solo lectura (lo exige la base de datos). */
+  readonly isReadOnly = computed(() => this.subscription()?.state === 'EXPIRED');
 
   /** Se ejecuta antes del arranque (provideAppInitializer). */
   async init(): Promise<void> {
@@ -37,8 +45,7 @@ export class AuthService {
     this.supabase.auth.onAuthStateChange((event, session) => {
       this.session.set(session);
       if (event === 'SIGNED_OUT') {
-        this.profile.set(null);
-        this.lookups.reset();
+        this.clearUser();
         void this.router.navigate(['/login']);
       } else if (event === 'SIGNED_IN' && session && this.profile()?.id !== session.user.id) {
         // Fuera del callback para no bloquear el lock interno de supabase-js
@@ -50,12 +57,23 @@ export class AuthService {
   async loadProfile(): Promise<Profile | null> {
     const userId = this.session()?.user.id;
     if (!userId) {
-      this.profile.set(null);
+      this.clearUser();
       return null;
     }
-    const profile = unwrap(await this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle()) as Profile | null;
-    this.profile.set(profile);
-    return profile;
+    const [profile, subscription, platform] = await Promise.all([
+      this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
+      this.supabase.rpc('my_subscription'),
+      this.supabase.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
+    ]);
+    this.subscription.set((unwrap(subscription) as MySubscription | null) ?? null);
+    this.isPlatformAdmin.set(unwrap(platform) !== null);
+    const p = unwrap(profile) as Profile | null;
+    this.profile.set(p);
+    return p;
+  }
+
+  async refreshSubscription(): Promise<void> {
+    this.subscription.set((unwrap(await this.supabase.rpc('my_subscription')) as MySubscription | null) ?? null);
   }
 
   async signIn(email: string, password: string): Promise<Profile | null> {
@@ -65,25 +83,32 @@ export class AuthService {
     return this.loadProfile();
   }
 
-  /** Devuelve true si la cuenta quedó con sesión iniciada (sin confirmación de email pendiente). */
-  async signUp(fullName: string, email: string, password: string): Promise<boolean> {
-    const { data, error } = await this.supabase.auth.signUp({
-      email,
-      password,
-      options: { data: { full_name: fullName } },
+  /** Envía el enlace para crear una nueva contraseña (también sirve para reenviar el acceso a un invitado). */
+  async requestPasswordReset(email: string): Promise<void> {
+    const { error } = await this.supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${location.origin}/activar-cuenta`,
     });
     if (error) throw new AppError(AUTH_MESSAGES[error.message] ?? error.message);
-    this.session.set(data.session);
-    if (data.session) await this.loadProfile();
-    return data.session !== null;
+  }
+
+  /** Define la contraseña del usuario con sesión (invitación o recuperación). */
+  async updatePassword(password: string): Promise<void> {
+    const { error } = await this.supabase.auth.updateUser({ password });
+    if (error) throw new AppError(AUTH_MESSAGES[error.message] ?? error.message);
   }
 
   async signOut(): Promise<void> {
     await this.supabase.auth.signOut();
     this.session.set(null);
-    this.profile.set(null);
-    this.lookups.reset();
+    this.clearUser();
     await this.router.navigate(['/login']);
+  }
+
+  private clearUser(): void {
+    this.profile.set(null);
+    this.subscription.set(null);
+    this.isPlatformAdmin.set(false);
+    this.lookups.reset();
   }
 
   hasRole(...roles: AppRole[]): boolean {

@@ -1,0 +1,257 @@
+<app-page-header title="Plataforma" subtitle="Empresas, planes, pagos de suscripción y solicitudes de acceso">
+  <p-button label="Actualizar" icon="pi pi-refresh" severity="secondary" [outlined]="true" [loading]="loading()" (onClick)="load()" />
+</app-page-header>
+
+@if (!overview()) {
+  <div class="kpis">
+    @for (i of [1, 2, 3, 4, 5, 6, 7]; track i) {
+      <p-skeleton height="5.2rem" />
+    }
+  </div>
+} @else {
+  @let ov = overview()!;
+  <div class="kpis">
+    <app-stat-card label="Empresas activas" [value]="ov.active" icon="pi pi-building" tone="green" [hint]="'De ' + ov.total + ' registradas'" />
+    <app-stat-card label="En prueba" [value]="ov.trial" icon="pi pi-clock" tone="blue" />
+    <app-stat-card label="Vencen en 7 días" [value]="ov.expiring_7_days" icon="pi pi-calendar-clock" [tone]="ov.expiring_7_days ? 'orange' : 'ink'" />
+    <app-stat-card
+      label="En gracia / vencidas"
+      [value]="ov.grace + ' / ' + ov.expired"
+      icon="pi pi-exclamation-triangle"
+      [tone]="ov.grace + ov.expired ? 'red' : 'green'"
+      [hint]="ov.suspended ? ov.suspended + ' suspendida(s)' : ''"
+    />
+    <app-stat-card label="Ingreso mensual recurrente" [value]="money(ov.mrr)" icon="pi pi-chart-line" tone="gold" hint="Planes activos y en gracia, precio mensual" />
+    <app-stat-card label="Cobrado este mes" [value]="money(ov.collected_month)" icon="pi pi-wallet" tone="green" />
+    <app-stat-card label="Solicitudes pendientes" [value]="ov.pending_requests" icon="pi pi-inbox" [tone]="ov.pending_requests ? 'orange' : 'ink'" />
+  </div>
+
+  <div class="revenue">
+    <app-chart-card
+      title="Cobrado por mes (últimos 12 meses)"
+      [labels]="revenueChart().labels"
+      [series]="revenueChart().series"
+      [valueLabels]="true"
+      [format]="compactMoney"
+      height="200px"
+    />
+  </div>
+}
+
+<div class="card" style="margin-top: var(--app-gap)">
+  <p-tabs value="orgs" [scrollable]="true">
+    <p-tablist>
+      <p-tab value="orgs"><i class="pi pi-building"></i> Empresas</p-tab>
+      <p-tab value="requests">
+        <i class="pi pi-inbox"></i> Solicitudes
+        @if (pendingRequests().length) {
+          <p-badge [value]="pendingRequests().length" severity="warn" />
+        }
+      </p-tab>
+      <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos</p-tab>
+      <p-tab value="plans"><i class="pi pi-th-large"></i> Planes</p-tab>
+    </p-tablist>
+    <p-tabpanels>
+      <!-- Empresas -->
+      <p-tabpanel value="orgs">
+        <div class="filters">
+          <span class="filters__search">
+            <i class="pi pi-search" aria-hidden="true"></i>
+            <input pInputText type="search" placeholder="Buscar empresa, RUC o correo" [ngModel]="search()" (ngModelChange)="search.set($event)" aria-label="Buscar empresa" />
+          </span>
+          <p-select
+            [options]="stateOptions"
+            [ngModel]="stateFilter()"
+            (ngModelChange)="stateFilter.set($event)"
+            optionLabel="label"
+            optionValue="value"
+            placeholder="Todos los estados"
+            [showClear]="true"
+            appendTo="body"
+            [style]="{ minWidth: '190px' }"
+          />
+        </div>
+        <p-table [value]="filteredOrgs()" [scrollable]="true" [tableStyle]="{ 'min-width': '980px' }" [rowHover]="true" size="small" [paginator]="filteredOrgs().length > 20" [rows]="20">
+          <ng-template #header>
+            <tr>
+              <th>Empresa</th>
+              <th>Plan</th>
+              <th>Estado</th>
+              <th>Vence</th>
+              <th class="text-right">Usuarios</th>
+              <th>Último pago</th>
+              <th class="text-right">Total pagado</th>
+              <th></th>
+            </tr>
+          </ng-template>
+          <ng-template #body let-o>
+            <tr>
+              <td>
+                <div class="strong">{{ o.name }}</div>
+                <div class="muted small">{{ o.owner_email ?? 'Sin administrador activo' }}{{ o.tax_id ? ' · RUC ' + o.tax_id : '' }}</div>
+              </td>
+              <td>
+                {{ o.plan_name }}
+                @if (o.extra_users) {
+                  <small class="muted">+{{ o.extra_users }}</small>
+                }
+              </td>
+              <td><app-status-tag [value]="o.state" [labels]="stateLabels" [severities]="stateSeverity" /></td>
+              <td class="nowrap" [class.text-danger]="o.days_left < 0">
+                {{ o.current_period_end | date: 'dd/MM/yyyy' }}
+                <div class="small" [class.muted]="o.days_left >= 0">{{ daysLabel(o) }}</div>
+              </td>
+              <td class="text-right mono" [class.text-danger]="o.seats_used > o.seat_limit">{{ o.seats_used }} / {{ o.seat_limit }}</td>
+              <td class="nowrap">{{ o.last_payment_at ? (o.last_payment_at | date: 'dd/MM/yyyy') : '—' }}</td>
+              <td class="text-right mono">{{ o.total_paid | money }}</td>
+              <td class="text-right nowrap">
+                <p-button icon="pi pi-wallet" label="Pago" size="small" [text]="true" (onClick)="openPayment(o)" />
+                <p-button icon="pi pi-sliders-h" size="small" [text]="true" severity="secondary" ariaLabel="Editar suscripción" pTooltip="Editar suscripción" (onClick)="openSubscription(o)" />
+              </td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="8"><app-empty-state icon="pi pi-building" message="No hay empresas que coincidan." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+
+      <!-- Solicitudes -->
+      <p-tabpanel value="requests">
+        <div class="filters">
+          <span class="row">
+            <p-toggleswitch inputId="all-req" [ngModel]="showAllRequests()" (ngModelChange)="showAllRequests.set($event)" />
+            <label for="all-req" class="small">Mostrar también aprobadas y rechazadas</label>
+          </span>
+        </div>
+        <p-table [value]="visibleRequests()" [scrollable]="true" [tableStyle]="{ 'min-width': '900px' }" size="small" [paginator]="visibleRequests().length > 20" [rows]="20">
+          <ng-template #header>
+            <tr><th>Recibida</th><th>Empresa</th><th>Contacto</th><th>Plan</th><th>Mensaje</th><th>Estado</th><th></th></tr>
+          </ng-template>
+          <ng-template #body let-r>
+            <tr>
+              <td class="nowrap">{{ r.created_at | date: 'dd/MM/yy HH:mm' }}</td>
+              <td>
+                <div class="strong">{{ r.company_name }}</div>
+                @if (r.tax_id) {
+                  <div class="muted small">RUC {{ r.tax_id }}</div>
+                }
+              </td>
+              <td>
+                <div>{{ r.contact_name }}</div>
+                <div class="muted small">{{ r.email }}{{ r.phone ? ' · ' + r.phone : '' }}</div>
+              </td>
+              <td>{{ planName(r.plan_code) }}</td>
+              <td class="msg">{{ r.message || '—' }}</td>
+              <td>
+                @switch (r.status) {
+                  @case ('PENDING') { <p-tag value="Pendiente" severity="warn" /> }
+                  @case ('APPROVED') { <p-tag value="Aprobada" severity="success" /> }
+                  @default { <p-tag value="Rechazada" severity="secondary" [pTooltip]="r.reject_reason ?? undefined" /> }
+                }
+              </td>
+              <td class="text-right nowrap">
+                @if (r.status === 'PENDING') {
+                  <p-button label="Aprobar" icon="pi pi-check" size="small" (onClick)="openRequest(r, 'approve')" />
+                  <p-button icon="pi pi-times" size="small" [text]="true" severity="danger" ariaLabel="Rechazar" pTooltip="Rechazar" (onClick)="openRequest(r, 'reject')" />
+                }
+              </td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="7"><app-empty-state icon="pi pi-inbox" message="No hay solicitudes pendientes." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+
+      <!-- Pagos -->
+      <p-tabpanel value="payments">
+        <p-table [value]="payments()" [scrollable]="true" [tableStyle]="{ 'min-width': '860px' }" size="small" [paginator]="payments().length > 25" [rows]="25">
+          <ng-template #header>
+            <tr><th>Fecha</th><th>Empresa</th><th>Plan</th><th>Periodo cubierto</th><th>Medio</th><th>Operación</th><th class="text-right">Monto</th></tr>
+          </ng-template>
+          <ng-template #body let-p>
+            <tr>
+              <td class="nowrap">{{ p.paid_at | date: 'dd/MM/yyyy' }}</td>
+              <td class="strong">{{ orgNames().get(p.org_id) ?? '—' }}</td>
+              <td>{{ planName(p.plan_code) }} · {{ p.months }} {{ p.months === 1 ? 'mes' : 'meses' }}</td>
+              <td class="nowrap">{{ p.period_start | date: 'dd/MM/yy' }} – {{ p.period_end | date: 'dd/MM/yy' }}</td>
+              <td>{{ methodLabel(p.method) }}</td>
+              <td class="muted">{{ p.reference ?? '—' }}</td>
+              <td class="text-right mono">{{ p.amount | money }}</td>
+            </tr>
+          </ng-template>
+          <ng-template #footer>
+            <tr>
+              <td colspan="6" class="text-right strong">Total</td>
+              <td class="text-right mono strong">{{ paymentsTotal() | money }}</td>
+            </tr>
+          </ng-template>
+          <ng-template #emptymessage>
+            <tr><td colspan="7"><app-empty-state icon="pi pi-wallet" message="Aún no hay pagos registrados." /></td></tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+
+      <!-- Planes -->
+      <p-tabpanel value="plans">
+        <p class="muted small">Cambiar el límite o el precio de un plan afecta a todas las empresas que lo tienen. Los pagos ya registrados no cambian.</p>
+        <p-table [value]="plans()" [scrollable]="true" [tableStyle]="{ 'min-width': '720px' }" size="small">
+          <ng-template #header>
+            <tr><th>Plan</th><th class="text-right">Usuarios</th><th class="text-right">Mensual</th><th class="text-right">Anual</th><th class="text-right">Usuario extra</th><th>Visible</th><th></th></tr>
+          </ng-template>
+          <ng-template #body let-p>
+            <tr [style.opacity]="p.active ? 1 : 0.55">
+              <td><span class="strong">{{ p.name }}</span> <span class="muted small">{{ p.code }}</span></td>
+              <td class="text-right">{{ p.max_users }}</td>
+              <td class="text-right mono">{{ p.price_month | money }}</td>
+              <td class="text-right mono">{{ p.price_year | money }}</td>
+              <td class="text-right mono">{{ p.extra_user_price === null ? '—' : (p.extra_user_price | money) }}</td>
+              <td>{{ p.active ? 'Sí' : 'No' }}</td>
+              <td class="text-right"><p-button icon="pi pi-pencil" size="small" [text]="true" severity="secondary" ariaLabel="Editar plan" (onClick)="editPlan(p)" /></td>
+            </tr>
+          </ng-template>
+        </p-table>
+      </p-tabpanel>
+    </p-tabpanels>
+  </p-tabs>
+</div>
+
+<app-saas-payment-dialog [(visible)]="paymentVisible" [org]="selectedOrg()" [plans]="plans()" (saved)="load()" />
+<app-subscription-dialog [(visible)]="subscriptionVisible" [org]="selectedOrg()" [plans]="plans()" (saved)="load()" />
+<app-request-dialog [(visible)]="requestVisible" [mode]="requestMode()" [request]="selectedRequest()" [plans]="plans()" (saved)="load()" />
+
+<p-dialog header="Editar plan" [(visible)]="planVisible" [modal]="true" [style]="{ width: '460px' }" [draggable]="false">
+  @if (editingPlan; as p) {
+    <form (ngSubmit)="savePlan()" class="form-grid" novalidate>
+      <div class="field field--full">
+        <label for="pl-name">Nombre</label>
+        <input pInputText id="pl-name" name="name" [(ngModel)]="p.name" required />
+      </div>
+      <div class="field">
+        <label for="pl-users">Usuarios incluidos</label>
+        <p-inputnumber inputId="pl-users" name="max_users" [(ngModel)]="p.max_users" [min]="1" [max]="1000" [fluid]="true" />
+      </div>
+      <div class="field">
+        <label for="pl-extra">Usuario extra (S/ / mes)</label>
+        <p-inputnumber inputId="pl-extra" name="extra" [(ngModel)]="p.extra_user_price" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" placeholder="No admite" />
+      </div>
+      <div class="field">
+        <label for="pl-month">Precio mensual</label>
+        <p-inputnumber inputId="pl-month" name="price_month" [(ngModel)]="p.price_month" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+      </div>
+      <div class="field">
+        <label for="pl-year">Precio anual</label>
+        <p-inputnumber inputId="pl-year" name="price_year" [(ngModel)]="p.price_year" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+      </div>
+      <div class="field field--full row">
+        <p-toggleswitch inputId="pl-active" name="active" [(ngModel)]="p.active" />
+        <label for="pl-active">Visible en «Solicitar acceso» y en «Mi plan»</label>
+      </div>
+      <div class="form-actions field--full">
+        <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="planVisible = false" />
+        <p-button type="submit" label="Guardar" icon="pi pi-check" [loading]="savingPlan()" />
+      </div>
+    </form>
+  }
+</p-dialog>

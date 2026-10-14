@@ -1,0 +1,81 @@
+<div class="auth-card auth-card--wide">
+  <div class="auth-brand">
+    <span>Au</span>
+    <div>
+      <h1>Solicitar acceso</h1>
+      <p>Pruebe Aurum gratis 14 días en su orfebrería</p>
+    </div>
+  </div>
+
+  @if (sent()) {
+    <p-message severity="success">
+      <div>
+        <strong>¡Solicitud enviada!</strong>
+        <p class="sent-text">
+          Revisaremos sus datos y le enviaremos un correo a <strong>{{ form.controls.email.value }}</strong> con el enlace para
+          crear su contraseña e ingresar como administrador de su empresa.
+        </p>
+      </div>
+    </p-message>
+    <p class="auth-footer"><a routerLink="/login">Volver al inicio de sesión</a></p>
+  } @else {
+    @if (plans().length) {
+      <fieldset class="plans">
+        <legend>Elija un plan (podrá cambiarlo después)</legend>
+        @for (p of plans(); track p.code) {
+          <label class="plan" [class.plan--selected]="form.controls.plan_code.value === p.code">
+            <input type="radio" name="plan" [value]="p.code" [formControl]="form.controls.plan_code" />
+            <span class="plan__name">{{ p.name }}</span>
+            <span class="plan__price">S/ {{ p.price_month | number: '1.0-0' }}<small>/mes</small></span>
+            <span class="plan__users"><i class="pi pi-users"></i> Hasta {{ p.max_users }} usuarios</span>
+            @if (p.extra_user_price) {
+              <span class="plan__extra">+ S/ {{ p.extra_user_price | number: '1.0-0' }} por usuario adicional</span>
+            }
+            <span class="plan__extra">o S/ {{ p.price_year | number: '1.0-0' }} al año</span>
+          </label>
+        }
+      </fieldset>
+    }
+
+    @if (error()) {
+      <p-message severity="error" [text]="error()!" />
+    }
+
+    <form [formGroup]="form" (ngSubmit)="submit()" class="form-grid" novalidate>
+      <div class="field">
+        <label for="ra-company">Nombre de la empresa <span class="req">*</span></label>
+        <input pInputText id="ra-company" formControlName="company_name" autocomplete="organization" />
+        <app-field-error [control]="form.controls.company_name" />
+      </div>
+      <div class="field">
+        <label for="ra-ruc">RUC</label>
+        <input pInputText id="ra-ruc" formControlName="tax_id" inputmode="numeric" maxlength="11" />
+        <app-field-error [control]="form.controls.tax_id" />
+      </div>
+      <div class="field">
+        <label for="ra-name">Su nombre completo <span class="req">*</span></label>
+        <input pInputText id="ra-name" formControlName="contact_name" autocomplete="name" />
+        <app-field-error [control]="form.controls.contact_name" />
+      </div>
+      <div class="field">
+        <label for="ra-phone">Celular / WhatsApp <span class="req">*</span></label>
+        <input pInputText id="ra-phone" formControlName="phone" autocomplete="tel" inputmode="tel" />
+        <app-field-error [control]="form.controls.phone" />
+      </div>
+      <div class="field field--full">
+        <label for="ra-email">Correo electrónico <span class="req">*</span></label>
+        <input pInputText id="ra-email" type="email" formControlName="email" autocomplete="email" />
+        <small class="muted">Será el usuario administrador de su empresa.</small>
+        <app-field-error [control]="form.controls.email" />
+      </div>
+      <div class="field field--full">
+        <label for="ra-msg">Comentarios</label>
+        <textarea pTextarea id="ra-msg" formControlName="message" rows="2" [autoResize]="true" placeholder="¿Cuántas personas trabajan en su taller? ¿Qué necesita controlar?"></textarea>
+      </div>
+      <div class="field--full">
+        <p-button type="submit" label="Enviar solicitud" icon="pi pi-send" [loading]="loading()" [fluid]="true" />
+      </div>
+    </form>
+    <p class="auth-footer">¿Ya tiene cuenta? <a routerLink="/login">Iniciar sesión</a></p>
+  }
+</div>

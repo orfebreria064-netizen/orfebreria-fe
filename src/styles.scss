@@ -4,7 +4,7 @@
    ==================================================================== */
 
 :root {
-  --app-sidebar-width: 248px;
+  --app-sidebar-width: 212px;
   --app-sidebar-bg: #1f2430;
   --app-sidebar-fg: #c9ccd3;
   --app-sidebar-muted: #8a909c;
@@ -24,6 +24,11 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+}
+
+/* Escala base al 85%: todo lo definido en rem (app y PrimeNG) se reduce un 15%. */
+html {
+  font-size: 85%;
 }
 
 body {
@@ -47,6 +52,11 @@ a {
 
 .card + .card {
   margin-top: var(--app-gap);
+}
+
+/* Dentro de una grilla el espaciado lo da el gap; el margen desalinearía las columnas. */
+.grid-cols > .card + .card {
+  margin-top: 0;
 }
 
 .card__title {
@@ -196,7 +206,11 @@ a {
   margin-top: 1rem;
 }
 
-.text-right {
+.text-right,
+// El tema de PrimeNG fija text-align: start en las celdas de tabla.
+.p-datatable .p-datatable-thead > tr > th.text-right,
+.p-datatable .p-datatable-tbody > tr > td.text-right,
+.p-datatable .p-datatable-tfoot > tr > td.text-right {
   text-align: right;
 }
 
@@ -270,6 +284,25 @@ a {
 .amounts small {
   color: var(--p-surface-500);
   font-size: 0.75rem;
+}
+
+/* ---------- Controles PrimeNG ----------
+   PrimeNG fija 1rem en botones y campos; se igualan al texto de la página (0.925rem).
+   `body` sube la especificidad sobre los estilos que PrimeNG inyecta en tiempo de ejecución.
+   Las variantes -sm/-lg conservan su tamaño. */
+body {
+  .p-inputtext:not(.p-inputtext-sm, .p-inputtext-lg),
+  .p-textarea:not(.p-textarea-sm, .p-textarea-lg),
+  .p-select:not(.p-select-sm, .p-select-lg) .p-select-label,
+  .p-multiselect:not(.p-multiselect-sm, .p-multiselect-lg) .p-multiselect-label,
+  .p-button:not(.p-button-sm, .p-button-lg),
+  .p-togglebutton,
+  .p-tab,
+  .p-select-option,
+  .p-multiselect-option,
+  .p-autocomplete-option {
+    font-size: 0.925rem;
+  }
 }
 
 /* ---------- Tablas ---------- */

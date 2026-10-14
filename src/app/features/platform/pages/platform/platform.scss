@@ -1,0 +1,64 @@
+// 7 KPI en dos filas sin huérfanos: 4 de estado + 3 de dinero/solicitudes (más anchos).
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: var(--app-gap);
+
+  > * {
+    grid-column: span 3;
+  }
+
+  > :nth-child(n + 5) {
+    grid-column: span 4;
+  }
+}
+
+.revenue {
+  margin-top: var(--app-gap);
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.filters__search {
+  position: relative;
+  flex: 1;
+  max-width: 360px;
+  min-width: 220px;
+
+  i {
+    position: absolute;
+    top: 50%;
+    left: 0.75rem;
+    transform: translateY(-50%);
+    color: var(--p-surface-400);
+  }
+
+  input {
+    width: 100%;
+    padding-left: 2.25rem;
+  }
+}
+
+.msg {
+  max-width: 260px;
+  font-size: 0.8rem;
+  color: var(--p-surface-600);
+}
+
+@media (max-width: 1199px) {
+  .kpis > * {
+    grid-column: span 6;
+  }
+}
+
+@media (max-width: 640px) {
+  .kpis > :nth-child(n + 5) {
+    grid-column: span 12;
+  }
+}

@@ -12,7 +12,7 @@ export type StatTone = 'gold' | 'ink' | 'green' | 'red' | 'blue' | 'orange';
       <span class="stat__icon"><i [class]="icon()"></i></span>
       <span class="stat__body">
         <span class="stat__label">{{ label() }}</span>
-        <span class="stat__value">{{ value() }}</span>
+        <span class="stat__value" [title]="value()">{{ value() }}</span>
         @if (hint()) {
           <span class="stat__hint">{{ hint() }}</span>
         }
@@ -56,14 +56,18 @@ export type StatTone = 'gold' | 'ink' | 'green' | 'red' | 'blue' | 'orange';
     .stat__body {
       display: flex;
       flex-direction: column;
+      flex: 1;
       min-width: 0;
+      container-type: inline-size;
     }
     .stat__label {
       font-size: 0.8rem;
       color: var(--p-surface-500);
     }
     .stat__value {
-      font-size: 1.35rem;
+      /* Se reduce con el ancho de la tarjeta para que montos y códigos largos no se corten. */
+      font-size: clamp(1rem, 11cqi, 1.35rem);
+      line-height: 1.25;
       font-weight: 650;
       color: var(--p-surface-900);
       font-variant-numeric: tabular-nums;

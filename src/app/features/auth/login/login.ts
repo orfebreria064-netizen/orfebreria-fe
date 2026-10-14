@@ -20,6 +20,8 @@ export class Login {
 
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
+  protected readonly mode = signal<'login' | 'reset'>('login');
+  protected readonly resetSent = signal(false);
 
   protected readonly form = inject(FormBuilder).nonNullable.group({
     email: ['', [Validators.required, Validators.email]],
@@ -36,9 +38,34 @@ export class Login {
     try {
       const { email, password } = this.form.getRawValue();
       const profile = await this.auth.signIn(email.trim(), password);
-      await this.router.navigateByUrl(profile?.active ? this.auth.homeUrl() : '/cuenta-pendiente');
+      const url = !profile?.active ? '/cuenta-pendiente' : this.auth.isBlocked() ? '/cuenta-suspendida' : this.auth.homeUrl();
+      await this.router.navigateByUrl(url);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');
+    } finally {
+      this.loading.set(false);
+    }
+  }
+
+  protected switchMode(mode: 'login' | 'reset'): void {
+    this.mode.set(mode);
+    this.resetSent.set(false);
+    this.error.set(null);
+  }
+
+  async sendReset(): Promise<void> {
+    const email = this.form.controls.email;
+    if (email.invalid) {
+      email.markAsTouched();
+      return;
+    }
+    this.loading.set(true);
+    this.error.set(null);
+    try {
+      await this.auth.requestPasswordReset(email.value.trim());
+      this.resetSent.set(true);
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : 'No se pudo enviar el enlace.');
     } finally {
       this.loading.set(false);
     }

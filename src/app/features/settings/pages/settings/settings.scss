@@ -1,0 +1,89 @@
+.seats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.seats__info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  flex: 1;
+  min-width: 240px;
+  max-width: 460px;
+}
+
+:host ::ng-deep .seats__bar {
+  height: 6px;
+  margin-top: 0.25rem;
+}
+
+.plan-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--app-gap);
+  margin-bottom: 1.25rem;
+}
+
+.plan-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--p-surface-200);
+  border-radius: var(--app-radius);
+
+  > a {
+    align-self: flex-start;
+    text-decoration: none;
+  }
+}
+
+.plan-box__head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.plan-box__name {
+  font-size: 1.4rem;
+}
+
+.plan-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 2rem;
+  margin: 0;
+
+  dt {
+    font-size: 0.75rem;
+    color: var(--p-surface-500);
+  }
+
+  dd {
+    margin: 0.1rem 0 0;
+    font-size: 1.1rem;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.pay-steps {
+  margin: 0;
+  padding-left: 1.2rem;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+.plan-current {
+  background: var(--p-surface-50);
+}
+
+@media (max-width: 767px) {
+  .plan-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

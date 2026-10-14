@@ -16,9 +16,6 @@
     <app-stat-card label="Pedidos activos" [value]="d.kpis.active_orders" icon="pi pi-briefcase" tone="ink" link="/orders" />
     <app-stat-card label="En producción" [value]="d.kpis.in_production" icon="pi pi-cog" tone="orange" link="/production" />
     <app-stat-card label="Por entregar" [value]="d.kpis.ready_to_deliver" icon="pi pi-truck" tone="blue" link="/deliveries" />
-    <app-stat-card label="Cotizaciones pendientes" [value]="d.kpis.pending_quotations" icon="pi pi-file-edit" tone="gold" link="/quotations" />
-    <app-stat-card label="Ventas del mes" [value]="money(d.kpis.sales_month)" icon="pi pi-chart-line" tone="green" [hint]="'Cobrado: ' + money(d.kpis.collected_month)" />
-    <app-stat-card label="Total por cobrar" [value]="money(d.kpis.receivable)" icon="pi pi-wallet" tone="red" link="/payments" />
     <app-stat-card
       label="Pedidos atrasados"
       [value]="d.kpis.overdue_orders"
@@ -27,15 +24,22 @@
       link="/orders"
       [queryParams]="{ overdue: '1' }"
     />
+    <app-stat-card label="Cotizaciones pendientes" [value]="d.kpis.pending_quotations" icon="pi pi-file-edit" tone="gold" link="/quotations" />
+    <app-stat-card label="Ventas del mes" [value]="money(d.kpis.sales_month)" icon="pi pi-chart-line" tone="green" [hint]="'Cobrado: ' + money(d.kpis.collected_month)" />
+    <app-stat-card label="Total por cobrar" [value]="money(d.kpis.receivable)" icon="pi pi-wallet" tone="red" link="/payments" />
   </div>
 
   <div class="dash-grid">
-    <app-chart-card class="span-2" title="Ventas y cobranza por mes (S/)" [labels]="salesChart().labels" [series]="salesChart().series" [format]="compactMoney" />
-    <app-chart-card title="Pedidos por estado" [labels]="statusChart().labels" [series]="statusChart().series" [horizontal]="true" height="300px" [format]="integer" />
-    <app-chart-card title="Pedidos por tipo de servicio" [labels]="serviceChart().labels" [series]="serviceChart().series" [horizontal]="true" [format]="integer" />
-    <app-chart-card title="Producción por etapa actual" [labels]="stageChart().labels" [series]="stageChart().series" [format]="integer" />
-
-    <section class="card alerts">
+    <app-chart-card
+      class="span-sales"
+      title="Ventas y cobranza por mes"
+      kind="area"
+      [labels]="salesChart().labels"
+      [series]="salesChart().series"
+      [summary]="salesChart().summary"
+      [format]="compactMoney"
+    />
+    <section class="card alerts span-alerts">
       <h2 class="card__title">Alertas <span class="muted small">{{ alertCount() }}</span></h2>
       @if (alertCount() === 0) {
         <app-empty-state icon="pi pi-check-circle" message="Todo en orden. No hay alertas." />
@@ -77,6 +81,32 @@
         }
       }
     </section>
+    <app-chart-card
+      title="Pedidos por estado"
+      [labels]="statusChart().labels"
+      [series]="statusChart().series"
+      [summary]="statusChart().summary"
+      [horizontal]="true"
+      [valueLabels]="true"
+      height="255px"
+      [format]="integer"
+    />
+    <app-chart-card
+      title="Pedidos por tipo de servicio"
+      kind="doughnut"
+      totalCaption="pedidos"
+      [labels]="serviceChart().labels"
+      [series]="serviceChart().series"
+      [format]="integer"
+    />
+    <app-chart-card
+      title="Producción por etapa actual"
+      [labels]="stageChart().labels"
+      [series]="stageChart().series"
+      [summary]="stageChart().summary"
+      [valueLabels]="true"
+      [format]="integer"
+    />
   </div>
 
   <section class="card" style="margin-top: 1rem">

@@ -1,12 +1,21 @@
 import { Routes } from '@angular/router';
-import { authGuard, guestGuard, homeRedirectGuard, roleGuard } from './core/guards/auth.guards';
+import { authGuard, guestGuard, homeRedirectGuard, platformGuard, roleGuard } from './core/guards/auth.guards';
 import { MODULE_ROLES } from './core/auth/roles';
 import { MainLayout } from './layout/main-layout/main-layout';
 
 export const routes: Routes = [
   { path: 'login', canActivate: [guestGuard], loadComponent: () => import('./features/auth/login/login').then((m) => m.Login), title: 'Iniciar sesión' },
-  { path: 'registro', canActivate: [guestGuard], loadComponent: () => import('./features/auth/register/register').then((m) => m.Register), title: 'Solicitar acceso' },
-  { path: 'cuenta-pendiente', loadComponent: () => import('./features/auth/pending/pending').then((m) => m.Pending), title: 'Cuenta pendiente' },
+  {
+    path: 'solicitar-acceso',
+    canActivate: [guestGuard],
+    loadComponent: () => import('./features/auth/request-access/request-access').then((m) => m.RequestAccess),
+    title: 'Solicitar acceso',
+  },
+  { path: 'registro', redirectTo: 'solicitar-acceso' },
+  // Destino de los enlaces de invitación y recuperación: sin guard, la sesión viene en el enlace.
+  { path: 'activar-cuenta', loadComponent: () => import('./features/auth/set-password/set-password').then((m) => m.SetPassword), title: 'Crear contraseña' },
+  { path: 'cuenta-pendiente', loadComponent: () => import('./features/auth/pending/pending').then((m) => m.Pending), title: 'Usuario inactivo' },
+  { path: 'cuenta-suspendida', loadComponent: () => import('./features/auth/suspended/suspended').then((m) => m.Suspended), title: 'Cuenta suspendida' },
   {
     path: '',
     component: MainLayout,
@@ -63,10 +72,22 @@ export const routes: Routes = [
         loadChildren: () => import('./features/deliveries/deliveries.routes').then((m) => m.DELIVERIES_ROUTES),
       },
       {
+        path: 'reports',
+        data: { breadcrumb: 'Reportes', roles: MODULE_ROLES.reports },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/reports/reports.routes').then((m) => m.REPORTS_ROUTES),
+      },
+      {
         path: 'settings',
         data: { breadcrumb: 'Configuración', roles: MODULE_ROLES.settings },
         canActivate: [roleGuard],
         loadChildren: () => import('./features/settings/settings.routes').then((m) => m.SETTINGS_ROUTES),
+      },
+      {
+        path: 'plataforma',
+        data: { breadcrumb: 'Plataforma' },
+        canActivate: [platformGuard],
+        loadChildren: () => import('./features/platform/platform.routes').then((m) => m.PLATFORM_ROUTES),
       },
     ],
   },

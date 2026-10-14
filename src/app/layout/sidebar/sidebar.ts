@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { label: 'Materiales', icon: 'pi pi-box', route: '/materials', module: 'materials' },
   { label: 'Pagos', icon: 'pi pi-wallet', route: '/payments', module: 'payments' },
   { label: 'Entregas', icon: 'pi pi-truck', route: '/deliveries', module: 'deliveries' },
+  { label: 'Reportes', icon: 'pi pi-chart-pie', route: '/reports', module: 'reports' },
   { label: 'Configuración', icon: 'pi pi-cog', route: '/settings', module: 'settings' },
 ];
 
@@ -40,12 +41,19 @@ const NAV: NavItem[] = [
           <span>{{ item.label }}</span>
         </a>
       }
+      @if (auth.isPlatformAdmin()) {
+        <span class="nav-section">Administración</span>
+        <a routerLink="/plataforma" routerLinkActive="active" (click)="navigate.emit()">
+          <i class="pi pi-server"></i>
+          <span>Plataforma</span>
+        </a>
+      }
     </nav>
   `,
   styleUrl: './sidebar.scss',
 })
 export class Sidebar {
-  private readonly auth = inject(AuthService);
+  protected readonly auth = inject(AuthService);
   readonly navigate = output<void>();
 
   protected readonly items = computed(() => {

@@ -1,0 +1,117 @@
+<app-page-header title="Reportes" subtitle="Información consolidada del negocio para exportar a Excel o PDF">
+  <p-button label="Excel" icon="pi pi-file-excel" severity="success" [outlined]="true" [loading]="exporting() === 'excel'" [disabled]="loading() || !rows().length" (onClick)="export('excel')" />
+  <p-button label="PDF" icon="pi pi-file-pdf" severity="danger" [outlined]="true" [loading]="exporting() === 'pdf'" [disabled]="loading() || !rows().length" (onClick)="export('pdf')" />
+</app-page-header>
+
+<div class="reports">
+  <nav class="card report-nav" aria-label="Reportes disponibles">
+    @for (r of reports; track r.key) {
+      <button type="button" class="report-nav__item" [class.active]="r.key === selected()" (click)="select(r.key)">
+        <i [class]="r.icon"></i>
+        <span>
+          <strong>{{ r.title }}</strong>
+          <small>{{ r.description }}</small>
+        </span>
+      </button>
+    }
+  </nav>
+
+  <section class="report-body">
+    <div class="card filters">
+      <div class="toolbar-filters" style="margin: 0">
+        @switch (selected()) {
+          @case ('ventas') {
+            <p-datepicker [(ngModel)]="range" selectionMode="range" dateFormat="dd/mm/yy" [showIcon]="true" [readonlyInput]="true" placeholder="Periodo" (onSelect)="onRange()" />
+            <p-select [options]="lookups.activeServiceTypes()" [(ngModel)]="serviceTypeId" (onChange)="load()" optionLabel="name" optionValue="id" placeholder="Todos los servicios" [showClear]="true" [style]="{ minWidth: '190px' }" />
+            <p-select [options]="lookups.activeStaff()" [(ngModel)]="assignedTo" (onChange)="load()" optionLabel="full_name" optionValue="id" placeholder="Todos los responsables" [showClear]="true" [style]="{ minWidth: '190px' }" />
+            <div class="filter-customer"><app-customer-picker inputId="rp-customer" [allowCreate]="false" [(ngModel)]="customerId" (ngModelChange)="load()" /></div>
+          }
+          @case ('cobrar') {
+            <div class="filter-customer"><app-customer-picker inputId="rp-customer" [allowCreate]="false" [(ngModel)]="customerId" (ngModelChange)="load()" /></div>
+            <p-select [options]="buckets" [ngModel]="bucket()" (ngModelChange)="bucket.set($event)" optionLabel="label" optionValue="value" placeholder="Toda antigüedad" [showClear]="true" [style]="{ minWidth: '180px' }" />
+          }
+          @case ('cobranza') {
+            <p-datepicker [(ngModel)]="range" selectionMode="range" dateFormat="dd/mm/yy" [showIcon]="true" [readonlyInput]="true" placeholder="Periodo" (onSelect)="onRange()" />
+            <p-select [options]="methods" [(ngModel)]="method" (onChange)="load()" optionLabel="label" optionValue="value" placeholder="Todos los métodos" [showClear]="true" [style]="{ minWidth: '180px' }" />
+            <div class="row">
+              <p-checkbox inputId="rp-voided" [(ngModel)]="includeVoided" [binary]="true" (onChange)="load()" />
+              <label for="rp-voided" class="small">Incluir anulados</label>
+            </div>
+          }
+          @case ('plazos') {
+            <p-select [options]="horizons" [(ngModel)]="daysAhead" (onChange)="load()" optionLabel="label" optionValue="value" [style]="{ minWidth: '230px' }" />
+            <p-select [options]="lookups.activeStaff()" [(ngModel)]="assignedTo" (onChange)="load()" optionLabel="full_name" optionValue="id" placeholder="Todos los responsables" [showClear]="true" [style]="{ minWidth: '190px' }" />
+          }
+          @case ('stock') {
+            <p-select [options]="materialTypes" [(ngModel)]="materialType" (onChange)="load()" optionLabel="label" optionValue="value" placeholder="Todos los tipos" [showClear]="true" [style]="{ minWidth: '190px' }" />
+            <div class="row">
+              <p-checkbox inputId="rp-low" [ngModel]="onlyBelowMin()" (ngModelChange)="onlyBelowMin.set($event)" [binary]="true" />
+              <label for="rp-low" class="small">Solo bajo mínimo</label>
+            </div>
+            <div class="row">
+              <p-checkbox inputId="rp-inactive" [(ngModel)]="includeInactive" [binary]="true" (onChange)="load()" />
+              <label for="rp-inactive" class="small">Incluir inactivos</label>
+            </div>
+          }
+          @case ('custodia') {
+            <div class="filter-customer"><app-customer-picker inputId="rp-customer" [allowCreate]="false" [(ngModel)]="customerId" (ngModelChange)="load()" /></div>
+          }
+        }
+        <p-button icon="pi pi-refresh" severity="secondary" [text]="true" ariaLabel="Actualizar" [loading]="loading()" (onClick)="load()" />
+      </div>
+      @if (selected() === 'cobrar') {
+        <small class="muted">La antigüedad se cuenta desde la entrega; si no se entregó, desde la fecha de entrega comprometida.</small>
+      }
+    </div>
+
+    <div class="summary">
+      @for (s of summary(); track s.label) {
+        <app-stat-card [label]="s.label" [value]="s.value" [hint]="s.hint ?? null" [icon]="s.icon ?? 'pi pi-chart-bar'" [tone]="s.tone ?? 'ink'" />
+      }
+    </div>
+
+    <div class="card">
+      <h2 class="card__title">{{ info().title }} <span class="muted small">{{ rows().length }} registro(s)</span></h2>
+      <p-table
+        [value]="rows()"
+        [columns]="columns()"
+        [loading]="loading()"
+        [scrollable]="true"
+        [paginator]="rows().length > 25"
+        [rows]="25"
+        [rowHover]="true"
+        size="small"
+        [tableStyle]="{ 'min-width': '900px' }"
+      >
+        <ng-template #header let-cols>
+          <tr>
+            @for (c of cols; track c.key) {
+              <th [class.text-right]="isNumeric(c)" [pSortableColumn]="c.key">{{ c.header }} <p-sortIcon [field]="c.key" /></th>
+            }
+          </tr>
+        </ng-template>
+        <ng-template #body let-row let-cols="columns">
+          <tr class="p-datatable-row-clickable" (click)="openRow(row)" [style.opacity]="row.voided ? 0.6 : 1">
+            @for (c of cols; track c.key) {
+              <td [class.text-right]="isNumeric(c)" [class.mono]="isNumeric(c)" [class.nowrap]="c.type !== 'text'" [class.text-danger]="danger(row, c)" [class.strong]="$first">
+                {{ cell(row, c) }}
+              </td>
+            }
+          </tr>
+        </ng-template>
+        @if (hasTotals()) {
+          <ng-template #footer let-cols>
+            <tr>
+              @for (c of cols; track c.key) {
+                <td [class.text-right]="isNumeric(c)" class="mono strong">{{ c.total ? total(c) : $first ? 'Total' : '' }}</td>
+              }
+            </tr>
+          </ng-template>
+        }
+        <ng-template #emptymessage>
+          <tr><td [attr.colspan]="columns().length"><app-empty-state icon="pi pi-chart-bar" message="Sin datos para los filtros seleccionados." /></td></tr>
+        </ng-template>
+      </p-table>
+    </div>
+  </section>
+</div>
