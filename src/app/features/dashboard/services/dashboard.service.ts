@@ -1,7 +1,6 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { OrderStatus } from '../../../core/models/domain';
-import { unwrap } from '../../../shared/utils/db';
 
 export interface DashboardData {
   kpis: {
@@ -9,9 +8,13 @@ export interface DashboardData {
     in_production: number;
     ready_to_deliver: number;
     pending_quotations: number;
+    /** Montos en soles; los de pedidos en dólares van en *_usd. */
     sales_month: number;
+    sales_month_usd: number;
     collected_month: number;
+    collected_month_usd: number;
     receivable: number;
+    receivable_usd: number;
     overdue_orders: number;
   };
   orders_by_status: { status: OrderStatus; count: number }[];
@@ -26,22 +29,23 @@ export interface DashboardData {
     due_date: string;
     status: OrderStatus;
     balance: number;
+    currency: string;
   }[];
   alerts: {
     overdue: { id: string; number: string; customer_name: string; due_date: string }[];
-    pending_quotations: { id: string; number: string; customer_name: string; expiry_date: string; total: number }[];
-    pending_payments: { id: string; number: string; customer_name: string; balance: number }[];
+    pending_quotations: { id: string; number: string; customer_name: string; expiry_date: string; total: number; currency: string }[];
+    pending_payments: { id: string; number: string; customer_name: string; balance: number; currency: string }[];
     upcoming: { id: string; number: string; customer_name: string; due_date: string }[];
   };
 }
 
-/** Dashboard gerencial: una sola llamada RPC (get_dashboard), filtrada por RLS. */
+/** Dashboard gerencial: una sola llamada (Reporte/dashboard) con la visibilidad del usuario. */
 @Injectable({ providedIn: 'root' })
 export class DashboardService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async load(): Promise<DashboardData> {
-    await this.db.rpc('expire_quotations');
-    return unwrap(await this.db.rpc('get_dashboard')) as DashboardData;
+    await this.api.procesar('Cotizacion/vencer').catch(() => undefined);
+    return this.api.get<DashboardData>('Reporte/dashboard');
   }
 }

@@ -22,6 +22,7 @@ import { MaterialsService } from '../../services/materials.service';
 import { MaterialDialog } from '../../components/material-dialog/material-dialog';
 import { MovementDialog } from '../../components/movement-dialog/movement-dialog';
 import { MovementsTable } from '../../components/movements-table/movements-table';
+import { MaterialPrices } from '../../components/material-prices/material-prices';
 
 @Component({
   selector: 'app-material-list',
@@ -42,6 +43,7 @@ import { MovementsTable } from '../../components/movements-table/movements-table
     MaterialDialog,
     MovementDialog,
     MovementsTable,
+    MaterialPrices,
   ],
   templateUrl: './material-list.html',
 })

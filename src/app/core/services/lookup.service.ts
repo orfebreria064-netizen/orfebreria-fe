@@ -1,8 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
-import { SupabaseService } from './supabase.service';
+import { ApiService } from './api.service';
 import { CompanySettings, ProductionStageTemplate, ServiceType } from '../models/catalog.model';
 import { StaffMember } from '../models/profile.model';
-import { unwrap } from '../../shared/utils/db';
 
 /**
  * Catálogos compartidos (tipos de servicio, personal, plantilla de etapas, configuración),
@@ -10,7 +9,7 @@ import { unwrap } from '../../shared/utils/db';
  */
 @Injectable({ providedIn: 'root' })
 export class LookupService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   readonly serviceTypes = signal<ServiceType[]>([]);
   readonly staff = signal<StaffMember[]>([]);
@@ -30,15 +29,15 @@ export class LookupService {
 
   async reload(): Promise<void> {
     const [types, staff, stages, settings] = await Promise.all([
-      this.db.from('service_types').select('id, code, name, position, active').order('position'),
-      this.db.from('profiles').select('id, full_name, role, active').order('full_name'),
-      this.db.from('production_stages').select('id, name, position, is_quality_check, active').order('position'),
-      this.db.from('settings').select('*').maybeSingle(),
+      this.api.get<ServiceType[]>('Configuracion/listarservicios', { incluirinactivos: true }),
+      this.api.get<StaffMember[]>('Seguridad/listarusuarios'),
+      this.api.get<ProductionStageTemplate[]>('Configuracion/listaretapas', { incluirinactivos: true }),
+      this.api.get<CompanySettings>('Configuracion/traerconfiguracion'),
     ]);
-    this.serviceTypes.set(unwrap(types) as ServiceType[]);
-    this.staff.set(unwrap(staff) as StaffMember[]);
-    this.stageTemplates.set(unwrap(stages) as ProductionStageTemplate[]);
-    this.settings.set(unwrap(settings) as CompanySettings | null);
+    this.serviceTypes.set(types);
+    this.staff.set([...staff].sort((a, b) => a.full_name.localeCompare(b.full_name)));
+    this.stageTemplates.set(stages);
+    this.settings.set(settings);
   }
 
   /** Limpia la caché (al cerrar sesión). */

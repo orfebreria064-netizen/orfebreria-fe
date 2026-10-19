@@ -7,6 +7,8 @@ import { SelectModule } from 'primeng/select';
 import { DatePickerModule } from 'primeng/datepicker';
 import { CheckboxModule } from 'primeng/checkbox';
 import {
+  CURRENCY_OPTIONS,
+  Currency,
   MATERIAL_TYPE_LABELS,
   MATERIAL_TYPE_OPTIONS,
   MaterialType,
@@ -88,6 +90,10 @@ export class Reports implements OnInit {
   protected includeInactive = false;
   protected readonly bucket = signal<AgingBucket | null>(null);
   protected readonly onlyBelowMin = signal(false);
+  /** Moneda de los reportes con montos: no se suman soles con dólares. */
+  protected readonly currency = signal<Currency>('PEN');
+  protected readonly currencies = CURRENCY_OPTIONS;
+  protected readonly hasMoney = computed(() => ['ventas', 'cobrar', 'cobranza', 'plazos'].includes(this.selected()));
 
   protected readonly methods = PAYMENT_METHOD_OPTIONS;
   protected readonly materialTypes = MATERIAL_TYPE_OPTIONS;
@@ -104,8 +110,18 @@ export class Reports implements OnInit {
     const rows = this.data();
     if (this.selected() === 'cobrar' && this.bucket()) return rows.filter((r) => r['bucket'] === this.bucket());
     if (this.selected() === 'stock' && this.onlyBelowMin()) return rows.filter((r) => r['below_min']);
+    if (this.selected() === 'plazos') return rows.filter((r) => (r['currency'] ?? 'PEN') === this.currency());
     return rows;
   });
+
+  protected money(value: number): string {
+    return formatMoney(value, this.hasMoney() ? this.currency() : 'PEN');
+  }
+
+  protected setCurrency(currency: Currency): void {
+    this.currency.set(currency);
+    if (this.selected() !== 'plazos') void this.load();
+  }
 
   protected readonly columns = computed<ReportColumn[]>(() => {
     switch (this.selected()) {
@@ -140,6 +156,7 @@ export class Reports implements OnInit {
       case 'cobranza':
         return [
           { key: 'payment_date', header: 'Fecha', type: 'date' },
+          { key: 'receipt_number', header: 'Recibo', width: 16 },
           { key: 'order_number', header: 'Pedido', width: 18 },
           { key: 'customer_name', header: 'Cliente', width: 28 },
           { key: 'method', header: 'Método', type: 'label', labels: PAYMENT_METHOD_LABELS, width: 14 },
@@ -204,16 +221,16 @@ export class Reports implements OnInit {
         const total = sum(r, (x) => x.total);
         return [
           { label: 'Pedidos', value: String(r.length), icon: 'pi pi-briefcase', tone: 'ink' },
-          { label: 'Ventas', value: formatMoney(total), hint: `IGV: ${formatMoney(sum(r, (x) => x.tax_amount))}`, icon: 'pi pi-chart-line', tone: 'gold' },
-          { label: 'Cobrado', value: formatMoney(sum(r, (x) => x.amount_paid)), icon: 'pi pi-wallet', tone: 'green' },
-          { label: 'Ticket promedio', value: formatMoney(r.length ? total / r.length : 0), icon: 'pi pi-tag', tone: 'blue' },
+          { label: 'Ventas', value: this.money(total), hint: `IGV: ${this.money(sum(r, (x) => x.tax_amount))}`, icon: 'pi pi-chart-line', tone: 'gold' },
+          { label: 'Cobrado', value: this.money(sum(r, (x) => x.amount_paid)), icon: 'pi pi-wallet', tone: 'green' },
+          { label: 'Ticket promedio', value: this.money(r.length ? total / r.length : 0), icon: 'pi pi-tag', tone: 'blue' },
         ];
       }
       case 'cobrar': {
         const r = rows as unknown as ReceivableRow[];
-        const by = (b: AgingBucket[]) => formatMoney(sum(r.filter((x) => b.includes(x.bucket)), (x) => x.balance));
+        const by = (b: AgingBucket[]) => this.money(sum(r.filter((x) => b.includes(x.bucket)), (x) => x.balance));
         return [
-          { label: 'Total por cobrar', value: formatMoney(sum(r, (x) => x.balance)), hint: `${r.length} pedido(s)`, icon: 'pi pi-wallet', tone: 'red' },
+          { label: 'Total por cobrar', value: this.money(sum(r, (x) => x.balance)), hint: `${r.length} pedido(s)`, icon: 'pi pi-wallet', tone: 'red' },
           { label: 'Por vencer', value: by(['POR_VENCER']), icon: 'pi pi-calendar', tone: 'blue' },
           { label: '0 – 60 días', value: by(['0_30', '31_60']), icon: 'pi pi-clock', tone: 'orange' },
           { label: 'Más de 60 días', value: by(['61_90', 'MAS_90']), icon: 'pi pi-exclamation-triangle', tone: 'red' },
@@ -224,12 +241,12 @@ export class Reports implements OnInit {
         const voided = (rows as unknown as CollectionRow[]).filter((x) => x.voided);
         const byMethod = new Map<string, number>();
         r.forEach((x) => byMethod.set(x.method, (byMethod.get(x.method) ?? 0) + Number(x.amount)));
-        const top = [...byMethod.entries()].sort((a, b) => b[1] - a[1]).map(([m, t]) => `${PAYMENT_METHOD_LABELS[m as PaymentMethod]}: ${formatMoney(t)}`);
+        const top = [...byMethod.entries()].sort((a, b) => b[1] - a[1]).map(([m, t]) => `${PAYMENT_METHOD_LABELS[m as PaymentMethod]}: ${this.money(t)}`);
         return [
-          { label: 'Cobrado', value: formatMoney(sum(r, (x) => x.amount)), hint: `${r.length} pago(s)`, icon: 'pi pi-wallet', tone: 'green' },
-          { label: 'Adelantos', value: formatMoney(sum(r.filter((x) => x.is_advance), (x) => x.amount)), icon: 'pi pi-forward', tone: 'blue' },
+          { label: 'Cobrado', value: this.money(sum(r, (x) => x.amount)), hint: `${r.length} pago(s)`, icon: 'pi pi-wallet', tone: 'green' },
+          { label: 'Adelantos', value: this.money(sum(r.filter((x) => x.is_advance), (x) => x.amount)), icon: 'pi pi-forward', tone: 'blue' },
           { label: 'Por método', value: top[0] ?? '—', hint: top.slice(1).join(' · ') || undefined, icon: 'pi pi-credit-card', tone: 'gold' },
-          { label: 'Anulado', value: formatMoney(sum(voided, (x) => x.amount)), hint: `${voided.length} pago(s)`, icon: 'pi pi-ban', tone: voided.length ? 'red' : 'ink' },
+          { label: 'Anulado', value: this.money(sum(voided, (x) => x.amount)), hint: `${voided.length} pago(s)`, icon: 'pi pi-ban', tone: voided.length ? 'red' : 'ink' },
         ];
       }
       case 'plazos': {
@@ -239,7 +256,7 @@ export class Reports implements OnInit {
           { label: 'Atrasados', value: String(late.length), icon: 'pi pi-exclamation-triangle', tone: late.length ? 'red' : 'green' },
           { label: 'Por entregar en el plazo', value: String(r.length - late.length), icon: 'pi pi-calendar-clock', tone: 'blue' },
           { label: 'Atraso máximo', value: late.length ? `${Math.max(...late.map((x) => -x.days_left))} día(s)` : '—', icon: 'pi pi-clock', tone: 'orange' },
-          { label: 'Saldo de estos pedidos', value: formatMoney(sum(r, (x) => x.balance)), icon: 'pi pi-wallet', tone: 'gold' },
+          { label: 'Saldo de estos pedidos', value: this.money(sum(r, (x) => x.balance)), icon: 'pi pi-wallet', tone: 'gold' },
         ];
       }
       case 'stock': {
@@ -248,7 +265,7 @@ export class Reports implements OnInit {
         const low = r.filter((x) => x.below_min);
         return [
           { label: 'Materiales', value: String(r.length), icon: 'pi pi-box', tone: 'ink' },
-          { label: 'Valor del inventario', value: formatMoney(sum(r, (x) => x.stock_value)), icon: 'pi pi-dollar', tone: 'gold' },
+          { label: 'Valor del inventario', value: this.money(sum(r, (x) => x.stock_value)), icon: 'pi pi-dollar', tone: 'gold' },
           { label: 'Metal en stock', value: `${qty.format(sum(metal, (x) => x.stock))} g`, icon: 'pi pi-database', tone: 'blue' },
           { label: 'Bajo mínimo', value: String(low.length), icon: 'pi pi-exclamation-triangle', tone: low.length ? 'red' : 'green' },
         ];
@@ -297,13 +314,13 @@ export class Reports implements OnInit {
       let rows: unknown[];
       switch (key) {
         case 'ventas':
-          rows = await this.service.sales({ from, to, serviceTypeId: this.serviceTypeId, customerId: this.customerId, assignedTo: this.assignedTo });
+          rows = await this.service.sales({ from, to, serviceTypeId: this.serviceTypeId, customerId: this.customerId, assignedTo: this.assignedTo, currency: this.currency() });
           break;
         case 'cobrar':
-          rows = await this.service.receivables(this.customerId);
+          rows = await this.service.receivables(this.customerId, this.currency());
           break;
         case 'cobranza':
-          rows = await this.service.collections({ from, to, method: this.method, includeVoided: this.includeVoided });
+          rows = await this.service.collections({ from, to, method: this.method, includeVoided: this.includeVoided, currency: this.currency() });
           break;
         case 'plazos':
           rows = await this.service.deadlines(this.daysAhead, this.assignedTo);
@@ -332,6 +349,7 @@ export class Reports implements OnInit {
         columns: this.columns(),
         rows: this.rows(),
         summary: this.summary().map((s) => ({ ...s, value: s.hint ? `${s.value} (${s.hint})` : s.value })),
+        currency: this.hasMoney() ? this.currency() : 'PEN',
         fileName: `${this.info().title.replace(/[^\p{L}\p{N}]+/gu, '_')}_${toIsoDate(new Date())}`,
       };
       if (kind === 'excel') await this.exporter.excel(payload);
@@ -349,7 +367,7 @@ export class Reports implements OnInit {
 
   protected total(col: ReportColumn): string {
     const t = columnTotal(this.rows(), col);
-    return col.type === 'money' ? formatMoney(t) : qty.format(t);
+    return col.type === 'money' ? this.money(t) : qty.format(t);
   }
 
   protected hasTotals(): boolean {
@@ -385,6 +403,7 @@ export class Reports implements OnInit {
   private filtersText(): string {
     const parts: string[] = [];
     const key = this.selected();
+    if (this.hasMoney()) parts.push(`Moneda: ${this.currency() === 'USD' ? 'dólares (US$)' : 'soles (S/)'}`);
     if (key === 'ventas' || key === 'cobranza') parts.push(`Periodo: ${fmtDate(this.range?.[0])} – ${fmtDate(this.range?.[1] ?? this.range?.[0])}`);
     if (key === 'ventas' && this.serviceTypeId) parts.push(`Servicio: ${this.lookups.serviceTypes().find((s) => s.id === this.serviceTypeId)?.name}`);
     if ((key === 'ventas' || key === 'plazos') && this.assignedTo) parts.push(`Responsable: ${this.lookups.staff().find((s) => s.id === this.assignedTo)?.full_name}`);

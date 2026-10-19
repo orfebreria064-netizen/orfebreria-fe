@@ -19,6 +19,9 @@
   <section class="report-body">
     <div class="card filters">
       <div class="toolbar-filters" style="margin: 0">
+        @if (hasMoney()) {
+          <p-select [options]="currencies" [ngModel]="currency()" (ngModelChange)="setCurrency($event)" optionLabel="label" optionValue="value" ariaLabel="Moneda" [style]="{ minWidth: '150px' }" />
+        }
         @switch (selected()) {
           @case ('ventas') {
             <p-datepicker [(ngModel)]="range" selectionMode="range" dateFormat="dd/mm/yy" [showIcon]="true" [readonlyInput]="true" placeholder="Periodo" (onSelect)="onRange()" />

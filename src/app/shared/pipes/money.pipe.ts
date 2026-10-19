@@ -1,15 +1,21 @@
 import { Pipe, PipeTransform } from '@angular/core';
 
-const formatter = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', minimumFractionDigits: 2 });
+const number = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-/** Formato de moneda peruana: S/ 1,500.00 */
-export function formatMoney(value: number | string | null | undefined): string {
-  return formatter.format(Number(value ?? 0));
+/** Símbolo de la moneda (igual en todos los navegadores): S/ para soles, US$ para dólares. */
+export function currencySymbol(currency: string | null | undefined): string {
+  return currency === 'USD' ? 'US$' : 'S/';
+}
+
+/** Formato de moneda: S/ 1,500.00 (soles, por defecto) o US$ 1,500.00 (dólares). */
+export function formatMoney(value: number | string | null | undefined, currency: string | null | undefined = 'PEN'): string {
+  const n = Number(value ?? 0);
+  return `${n < 0 ? '-' : ''}${currencySymbol(currency)} ${number.format(Math.abs(n))}`;
 }
 
 @Pipe({ name: 'money' })
 export class MoneyPipe implements PipeTransform {
-  transform(value: number | string | null | undefined): string {
-    return formatMoney(value);
+  transform(value: number | string | null | undefined, currency?: string | null): string {
+    return formatMoney(value, currency);
   }
 }

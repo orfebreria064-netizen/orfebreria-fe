@@ -25,8 +25,8 @@
       [queryParams]="{ overdue: '1' }"
     />
     <app-stat-card label="Cotizaciones pendientes" [value]="d.kpis.pending_quotations" icon="pi pi-file-edit" tone="gold" link="/quotations" />
-    <app-stat-card label="Ventas del mes" [value]="money(d.kpis.sales_month)" icon="pi pi-chart-line" tone="green" [hint]="'Cobrado: ' + money(d.kpis.collected_month)" />
-    <app-stat-card label="Total por cobrar" [value]="money(d.kpis.receivable)" icon="pi pi-wallet" tone="red" link="/payments" />
+    <app-stat-card label="Ventas del mes" [value]="withUsd(d.kpis.sales_month, d.kpis.sales_month_usd)" icon="pi pi-chart-line" tone="green" [hint]="'Cobrado: ' + withUsd(d.kpis.collected_month, d.kpis.collected_month_usd)" />
+    <app-stat-card label="Total por cobrar" [value]="withUsd(d.kpis.receivable, d.kpis.receivable_usd)" icon="pi pi-wallet" tone="red" link="/payments" />
   </div>
 
   <div class="dash-grid">
@@ -67,7 +67,7 @@
         @for (a of d.alerts.pending_payments; track a.id) {
           <a class="alert-row" [routerLink]="['/orders', a.id]">
             <span><strong>{{ a.number }}</strong> · {{ a.customer_name }}</span>
-            <span class="mono small text-danger">{{ a.balance | money }}</span>
+            <span class="mono small text-danger">{{ a.balance | money: a.currency }}</span>
           </a>
         }
       }
@@ -124,7 +124,7 @@
             {{ u.due_date | date: 'dd/MM/yyyy' }} <small class="muted">({{ daysLabel(u.due_date) }})</small>
           </td>
           <td class="nowrap"><app-status-tag [value]="u.status" [labels]="labels" [severities]="severities" /></td>
-          <td class="text-right mono nowrap" [class.text-danger]="u.balance > 0">{{ u.balance | money }}</td>
+          <td class="text-right mono nowrap" [class.text-danger]="u.balance > 0">{{ u.balance | money: u.currency }}</td>
         </tr>
       </ng-template>
       <ng-template #emptymessage>

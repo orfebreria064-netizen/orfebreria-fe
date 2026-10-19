@@ -1,12 +1,10 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { PaymentMethod } from '../../../core/models/domain';
-import { emptyToNull, unwrap } from '../../../shared/utils/db';
+import { emptyToNull } from '../../../shared/utils/db';
+import { mapOrderRow, mapPayment } from '../../../shared/utils/api-mappers';
 import { OrderRow } from '../../orders/models/order.model';
-import { ORDER_ROW_SELECT } from '../../orders/services/orders.service';
 import { Payment, PaymentInput } from '../models/payment.model';
-
-const PAYMENT_SELECT = '*, order:orders(id, number, customer:customers(id, full_name))';
 
 export interface PaymentFilters {
   from?: string | null;
@@ -16,50 +14,46 @@ export interface PaymentFilters {
 }
 
 /**
- * Pagos de pedidos. El total pagado y el saldo del pedido los recalcula PostgreSQL; un pago mayor
+ * Pagos de pedidos. El total pagado y el saldo del pedido los recalcula la base de datos; un pago mayor
  * al saldo requiere `overpayment_confirmed = true` (confirmación explícita del usuario).
  */
 @Injectable({ providedIn: 'root' })
 export class PaymentsService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async list(filters: PaymentFilters = {}): Promise<Payment[]> {
-    let query = this.db
-      .from('payments')
-      .select(PAYMENT_SELECT)
-      .order('payment_date', { ascending: false })
-      .order('created_at', { ascending: false });
-    if (filters.from) query = query.gte('payment_date', filters.from);
-    if (filters.to) query = query.lte('payment_date', filters.to);
-    if (filters.method) query = query.eq('method', filters.method);
-    if (!filters.includeVoided) query = query.eq('voided', false);
-    return unwrap(await query) as Payment[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Pago/listarpagos', {
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      method: filters.method ?? null,
+      include_voided: filters.includeVoided ?? false,
+    });
+    return rows.map(mapPayment);
   }
 
   async byOrder(orderId: string): Promise<Payment[]> {
-    return unwrap(
-      await this.db.from('payments').select(PAYMENT_SELECT).eq('order_id', orderId).order('payment_date').order('created_at'),
-    ) as Payment[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Pago/listarpagos', { order_id: orderId, include_voided: true });
+    return rows.map(mapPayment).sort((a, b) => a.payment_date.localeCompare(b.payment_date) || a.created_at.localeCompare(b.created_at));
   }
 
-  async create(input: PaymentInput): Promise<void> {
-    unwrap(await this.db.from('payments').insert(emptyToNull(input)));
+  /** Registra el pago (la base emite su recibo de ingreso). Devuelve el id del pago. */
+  async create(input: PaymentInput): Promise<string> {
+    return (await this.api.procesar('Pago/registrar', emptyToNull(input))).resultProceso!;
+  }
+
+  /** Número del recibo de ingreso (los pagos anteriores a los recibos lo reciben aquí). */
+  async issueReceipt(id: string): Promise<string> {
+    return (await this.api.procesar(`Pago/emitirrecibo/${id}`)).resultProceso!;
   }
 
   /** Los pagos no se eliminan: se anulan con motivo (queda en auditoría). */
   async void(id: string, reason: string): Promise<void> {
-    unwrap(await this.db.from('payments').update({ voided: true, void_reason: reason.trim() }).eq('id', id));
+    await this.api.procesar('Pago/anular', { payment_id: id, reason: reason.trim() });
   }
 
-  /** Cuentas por cobrar: pedidos no cancelados con saldo pendiente. */
+  /** Cuentas por cobrar: pedidos no cancelados con saldo pendiente (primero los de entrega más próxima). */
   async receivables(): Promise<OrderRow[]> {
-    return unwrap(
-      await this.db
-        .from('orders')
-        .select(ORDER_ROW_SELECT)
-        .gt('balance', 0)
-        .neq('status', 'CANCELADO')
-        .order('due_date', { ascending: true, nullsFirst: false }),
-    ) as OrderRow[];
+    const rows = (await this.api.get<Record<string, unknown>[]>('Pago/porcobrar')).map(mapOrderRow);
+    return rows.sort((a, b) => (a.due_date ?? '9999').localeCompare(b.due_date ?? '9999'));
   }
 }

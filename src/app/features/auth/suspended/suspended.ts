@@ -14,7 +14,7 @@ import { PLATFORM, whatsappLink } from '../../../core/config/platform';
         <span>Au</span>
         <div>
           <h1>{{ auth.subscription()?.state === 'CANCELLED' ? 'Cuenta cancelada' : 'Cuenta suspendida' }}</h1>
-          <p>{{ auth.session()?.user?.email }}</p>
+          <p>{{ auth.email() }}</p>
         </div>
       </div>
       <p>

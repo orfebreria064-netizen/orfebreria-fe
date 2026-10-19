@@ -101,8 +101,8 @@
             <i class="pi pi-exclamation-circle"></i>
           }
         </td>
-        <td class="text-right mono nowrap">{{ o.total | money }}</td>
-        <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0" [class.text-success]="o.balance <= 0">{{ o.balance | money }}</td>
+        <td class="text-right mono nowrap">{{ o.total | money: o.currency }}</td>
+        <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0" [class.text-success]="o.balance <= 0">{{ o.balance | money: o.currency }}</td>
       </tr>
     </ng-template>
     <ng-template #emptymessage>

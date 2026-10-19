@@ -1,50 +1,47 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { MaterialType, PaymentMethod } from '../../../core/models/domain';
-import { unwrap } from '../../../shared/utils/db';
 import { CollectionRow, CustodyRow, DeadlineRow, ReceivableRow, SalesRow, StockRow } from '../models/report.model';
 
-/** Reportes gerenciales: funciones report_* (0010_reports.sql). RLS aísla por empresa y cada función exige ADMIN o GERENTE. */
+/** Reportes gerenciales (Reporte/*). La base de datos aísla por empresa y exige ADMIN o GERENTE. */
 @Injectable({ providedIn: 'root' })
 export class ReportsService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
-  async sales(f: { from: string; to: string; serviceTypeId?: string | null; customerId?: string | null; assignedTo?: string | null }): Promise<SalesRow[]> {
-    return unwrap(
-      await this.db.rpc('report_sales', {
-        p_from: f.from,
-        p_to: f.to,
-        p_service_type_id: f.serviceTypeId ?? null,
-        p_customer_id: f.customerId ?? null,
-        p_assigned_to: f.assignedTo ?? null,
-      }),
-    ) as SalesRow[];
+  async sales(f: { from: string; to: string; serviceTypeId?: string | null; customerId?: string | null; assignedTo?: string | null; currency?: string | null }): Promise<SalesRow[]> {
+    return this.api.post<SalesRow[]>('Reporte/ventas', {
+      from: f.from,
+      to: f.to,
+      service_type_id: f.serviceTypeId ?? null,
+      customer_id: f.customerId ?? null,
+      assigned_to: f.assignedTo ?? null,
+      currency: f.currency ?? null,
+    });
   }
 
-  async receivables(customerId?: string | null): Promise<ReceivableRow[]> {
-    return unwrap(await this.db.rpc('report_receivables', { p_customer_id: customerId ?? null })) as ReceivableRow[];
+  async receivables(customerId?: string | null, currency?: string | null): Promise<ReceivableRow[]> {
+    return this.api.post<ReceivableRow[]>('Reporte/cuentasporcobrar', { customer_id: customerId ?? null, currency: currency ?? null });
   }
 
-  async collections(f: { from: string; to: string; method?: PaymentMethod | null; includeVoided?: boolean }): Promise<CollectionRow[]> {
-    return unwrap(
-      await this.db.rpc('report_collections', {
-        p_from: f.from,
-        p_to: f.to,
-        p_method: f.method ?? null,
-        p_include_voided: f.includeVoided ?? false,
-      }),
-    ) as CollectionRow[];
+  async collections(f: { from: string; to: string; method?: PaymentMethod | null; includeVoided?: boolean; currency?: string | null }): Promise<CollectionRow[]> {
+    return this.api.post<CollectionRow[]>('Reporte/cobranza', {
+      from: f.from,
+      to: f.to,
+      method: f.method ?? null,
+      include_voided: f.includeVoided ?? false,
+      currency: f.currency ?? null,
+    });
   }
 
   async deadlines(daysAhead: number, assignedTo?: string | null): Promise<DeadlineRow[]> {
-    return unwrap(await this.db.rpc('report_order_deadlines', { p_days_ahead: daysAhead, p_assigned_to: assignedTo ?? null })) as DeadlineRow[];
+    return this.api.post<DeadlineRow[]>('Reporte/plazos', { days_ahead: daysAhead, assigned_to: assignedTo ?? null });
   }
 
   async stock(type?: MaterialType | null, includeInactive = false): Promise<StockRow[]> {
-    return unwrap(await this.db.rpc('report_stock', { p_type: type ?? null, p_include_inactive: includeInactive })) as StockRow[];
+    return this.api.post<StockRow[]>('Reporte/stock', { type: type ?? null, include_inactive: includeInactive });
   }
 
   async custody(customerId?: string | null): Promise<CustodyRow[]> {
-    return unwrap(await this.db.rpc('report_client_custody', { p_customer_id: customerId ?? null })) as CustodyRow[];
+    return this.api.post<CustodyRow[]>('Reporte/custodia', { customer_id: customerId ?? null });
   }
 }

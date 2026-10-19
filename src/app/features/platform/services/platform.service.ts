@@ -1,6 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
-import { InvitationsService } from '../../../core/services/invitations.service';
+import { ApiService } from '../../../core/services/api.service';
 import {
   AccessRequest,
   PaymentMethodSaas,
@@ -10,7 +9,7 @@ import {
   SubscriptionPayment,
   SubscriptionStatus,
 } from '../../../core/models/subscription.model';
-import { toIsoDate, unwrap } from '../../../shared/utils/db';
+import { toIsoDate } from '../../../shared/utils/db';
 
 export interface RegisterPaymentInput {
   orgId: string;
@@ -33,87 +32,78 @@ export interface UpdateSubscriptionInput {
 }
 
 /**
- * Panel del superadministrador. Toda escritura pasa por RPC SECURITY DEFINER que
- * verifican is_platform_admin() en la base de datos.
+ * Panel del superadministrador. La base de datos verifica en cada procedimiento que el
+ * usuario sea administrador de la plataforma.
  */
 @Injectable({ providedIn: 'root' })
 export class PlatformService {
-  private readonly db = inject(SupabaseService).client;
-  private readonly invitations = inject(InvitationsService);
+  private readonly api = inject(ApiService);
 
   async overview(): Promise<PlatformOverview> {
-    return unwrap(await this.db.rpc('platform_overview')) as PlatformOverview;
+    return this.api.get<PlatformOverview>('Plataforma/resumen');
   }
 
   async organizations(): Promise<PlatformOrganization[]> {
-    return unwrap(await this.db.rpc('platform_organizations')) as PlatformOrganization[];
+    return this.api.get<PlatformOrganization[]>('Plataforma/empresas');
   }
 
   async requests(): Promise<AccessRequest[]> {
-    return unwrap(await this.db.from('access_requests').select('*').order('created_at', { ascending: false }).limit(500)) as AccessRequest[];
+    return this.api.get<AccessRequest[]>('Plataforma/solicitudes');
   }
 
   async payments(): Promise<SubscriptionPayment[]> {
-    return unwrap(
-      await this.db.from('subscription_payments').select('*').order('paid_at', { ascending: false }).order('created_at', { ascending: false }).limit(1000),
-    ) as SubscriptionPayment[];
+    return this.api.get<SubscriptionPayment[]>('Plataforma/pagossuscripcion');
   }
 
   async plans(): Promise<Plan[]> {
-    return unwrap(await this.db.from('plans').select('*').order('position')) as Plan[];
+    return this.api.get<Plan[]>('Plataforma/todosplanes');
   }
 
   async savePlan(plan: Plan): Promise<void> {
-    const { code, ...data } = plan;
-    unwrap(await this.db.from('plans').update(data).eq('code', code));
+    await this.api.procesar('Plataforma/actualizarplan', { max_branches: null, ...plan });
   }
 
-  /** Crea la empresa e invita al dueño. Devuelve el correo invitado. */
+  /** Crea la empresa e invita al dueño (la API envía el correo). Devuelve el correo invitado. */
   async approve(requestId: string, planCode: string, trialDays: number): Promise<string> {
-    const res = unwrap(
-      await this.db.rpc('platform_approve_request', { p_id: requestId, p_plan_code: planCode, p_trial_days: trialDays }),
-    ) as { invitation_id: string; email: string };
-    await this.invitations.send(res.invitation_id);
-    return res.email;
+    const r = await this.api.procesar<{ email: string }>('Plataforma/aprobarsolicitud', {
+      id: requestId,
+      plan_code: planCode,
+      trial_days: trialDays,
+    });
+    return r.data?.email ?? '';
   }
 
   async reject(requestId: string, reason: string): Promise<void> {
-    unwrap(await this.db.rpc('platform_reject_request', { p_id: requestId, p_reason: reason }));
+    await this.api.procesar('Plataforma/rechazarsolicitud', { id: requestId, reason });
   }
 
   async inviteAdmin(orgId: string, email: string, fullName: string): Promise<void> {
-    const id = unwrap(
-      await this.db.rpc('platform_invite_admin', { p_org_id: orgId, p_email: email, p_full_name: fullName }),
-    ) as string;
-    await this.invitations.send(id);
+    await this.api.procesar('Plataforma/invitaradmin', { org_id: orgId, email, full_name: fullName });
   }
 
   /** Devuelve la nueva fecha de vencimiento. */
   async registerPayment(input: RegisterPaymentInput): Promise<string> {
-    return unwrap(
-      await this.db.rpc('platform_register_payment', {
-        p_org_id: input.orgId,
-        p_plan_code: input.planCode,
-        p_amount: input.amount,
-        p_method: input.method,
-        p_months: input.months,
-        p_paid_at: toIsoDate(input.paidAt),
-        p_reference: input.reference,
-      }),
-    ) as string;
+    const r = await this.api.procesar<{ current_period_end: string }>('Plataforma/registrarpago', {
+      org_id: input.orgId,
+      plan_code: input.planCode,
+      amount: input.amount,
+      method: input.method,
+      months: input.months,
+      paid_at: toIsoDate(input.paidAt),
+      reference: input.reference || null,
+    });
+    return (r.data?.current_period_end ?? r.resultProceso ?? '').slice(0, 10);
   }
 
   async updateSubscription(input: UpdateSubscriptionInput): Promise<void> {
-    unwrap(
-      await this.db.rpc('platform_update_subscription', {
-        p_org_id: input.orgId,
-        p_plan_code: input.planCode,
-        p_status: input.status,
-        p_extra_users: input.extraUsers,
-        p_current_period_end: toIsoDate(input.currentPeriodEnd),
-        p_grace_days: input.graceDays,
-        p_notes: input.notes,
-      }),
-    );
+    await this.api.procesar('Plataforma/actualizarsuscripcion', {
+      org_id: input.orgId,
+      plan_code: input.planCode,
+      status: input.status,
+      extra_users: input.extraUsers,
+      current_period_end: toIsoDate(input.currentPeriodEnd),
+      grace_days: input.graceDays,
+      notes: input.notes || null,
+    });
   }
 }

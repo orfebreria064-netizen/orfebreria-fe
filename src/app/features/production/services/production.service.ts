@@ -1,13 +1,9 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { OrderStatus, StageStatus } from '../../../core/models/domain';
-import { emptyToNull, unwrap } from '../../../shared/utils/db';
+import { mapStage } from '../../../shared/utils/api-mappers';
 import { BoardStage, OrderStage } from '../../orders/models/order.model';
-
-const STAGE_SELECT = '*, assignee:profiles!order_production_stages_assigned_to_fkey(id, full_name)';
-const BOARD_SELECT =
-  STAGE_SELECT +
-  ', order:orders!inner(id, number, title, status, priority, due_date, progress, customer:customers(full_name))';
+import { OrdersService } from '../../orders/services/orders.service';
 
 /** Pedidos cuyo trabajo de taller sigue abierto (se muestran en el tablero). */
 export const BOARD_ORDER_STATUSES: OrderStatus[] = ['APROBADO', 'DISENO', 'PRODUCCION', 'CONTROL_CALIDAD', 'LISTO_ENTREGA', 'PAUSADO'];
@@ -20,48 +16,70 @@ export interface BoardFilters {
 
 /**
  * Etapas de producción por pedido. La etapa actual, el avance (%) y el estado del pedido
- * los recalcula PostgreSQL (trigger sync_order_production) tras cada cambio.
+ * los recalcula la base de datos tras cada cambio.
  */
 @Injectable({ providedIn: 'root' })
 export class ProductionService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
+  private readonly orders = inject(OrdersService);
 
   async stages(orderId: string): Promise<OrderStage[]> {
-    return unwrap(
-      await this.db.from('order_production_stages').select(STAGE_SELECT).eq('order_id', orderId).order('position'),
-    ) as OrderStage[];
+    const etapas = (await this.orders.sheet(orderId)).etapas;
+    return etapas.map((s) => mapStage(s, orderId)).sort((a, b) => a.position - b.position);
   }
 
   async board(filters: BoardFilters = {}): Promise<BoardStage[]> {
-    let query = this.db
-      .from('order_production_stages')
-      .select(BOARD_SELECT)
-      .in('order.status', BOARD_ORDER_STATUSES)
-      .order('position');
-    if (filters.onlyCurrent) query = query.eq('is_current', true);
-    if (filters.assignedTo) query = query.eq('assigned_to', filters.assignedTo);
-    if (filters.stageName) query = query.eq('name', filters.stageName);
-    return unwrap(await query) as unknown as BoardStage[];
+    const rows = await this.api.post<Record<string, any>[]>('Pedido/produccion', {}); // eslint-disable-line @typescript-eslint/no-explicit-any
+    return rows
+      .filter((r) => BOARD_ORDER_STATUSES.includes(r['order_status']))
+      .filter((r) => !filters.onlyCurrent || r['is_current'])
+      .filter((r) => !filters.assignedTo || r['assigned_to'] === filters.assignedTo)
+      .filter((r) => !filters.stageName || r['name'] === filters.stageName)
+      .map(
+        (r) =>
+          ({
+            ...mapStage(r, r['order_id']),
+            stage_id: null,
+            order: {
+              id: r['order_id'],
+              number: r['order_number'],
+              title: r['order_title'],
+              status: r['order_status'],
+              priority: r['priority'],
+              due_date: r['due_date'],
+              progress: r['progress'],
+              customer: r['customer_name'] ? { full_name: r['customer_name'] } : null,
+            },
+          }) as BoardStage,
+      )
+      .sort((a, b) => a.position - b.position);
   }
 
   /** Copia la plantilla de etapas al pedido. */
   async createFromTemplate(orderId: string): Promise<number> {
-    return unwrap(await this.db.rpc('create_order_stages', { p_order_id: orderId })) as number;
+    const r = await this.api.procesar<{ stages: number }>(`Pedido/generaretapas/${orderId}`);
+    return Number(r.data?.stages ?? r.resultProceso ?? 0);
   }
 
   async add(orderId: string, name: string, position: number, isQualityCheck = false): Promise<void> {
-    unwrap(
-      await this.db
-        .from('order_production_stages')
-        .insert({ order_id: orderId, name: name.trim(), position, is_quality_check: isQualityCheck }),
-    );
+    await this.api.procesar('Pedido/agregaretapa', { order_id: orderId, name: name.trim(), position, is_quality_check: isQualityCheck });
   }
 
+  /** Actualización parcial: solo cambia lo que viene en el patch. */
   async update(
     id: string,
     patch: Partial<Pick<OrderStage, 'status' | 'assigned_to' | 'notes' | 'name' | 'position'>>,
   ): Promise<void> {
-    unwrap(await this.db.from('order_production_stages').update(emptyToNull(patch)).eq('id', id));
+    await this.api.procesar('Pedido/actualizaretapa', {
+      stage_id: id,
+      status: patch.status ?? null,
+      assigned_to: patch.assigned_to ?? null,
+      update_assigned: 'assigned_to' in patch,
+      notes: patch.notes?.trim() || null,
+      update_notes: 'notes' in patch,
+      name: patch.name?.trim() || null,
+      position: patch.position ?? null,
+    });
   }
 
   async setStatus(id: string, status: StageStatus): Promise<void> {
@@ -69,6 +87,6 @@ export class ProductionService {
   }
 
   async remove(id: string): Promise<void> {
-    unwrap(await this.db.from('order_production_stages').delete().eq('id', id));
+    await this.api.procesar(`Pedido/eliminaretapa/${id}`);
   }
 }

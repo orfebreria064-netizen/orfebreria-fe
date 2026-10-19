@@ -1,6 +1,6 @@
 import { AppRole, Option, TagSeverity } from './domain';
 
-/** Coinciden con los CHECK y funciones de supabase/migrations/0009_saas_platform.sql. */
+/** Coinciden con los CHECK de subscriptions y fn_org_access_state (database/mssql/orfebreria_mssql.sql). */
 export type SubscriptionStatus = 'TRIAL' | 'ACTIVE' | 'SUSPENDED' | 'CANCELLED';
 /** Estado efectivo calculado por org_access_state(). */
 export type AccessState = SubscriptionStatus | 'GRACE' | 'EXPIRED';
@@ -46,6 +46,8 @@ export interface Plan {
   code: string;
   name: string;
   max_users: number;
+  /** null = sucursales ilimitadas. */
+  max_branches?: number | null;
   price_month: number;
   price_year: number;
   extra_user_price: number | null;
@@ -53,7 +55,7 @@ export interface Plan {
   active: boolean;
 }
 
-/** Resultado de my_subscription(). */
+/** Suscripción del usuario (Login/sesion). */
 export interface MySubscription {
   org_id: string;
   plan_code: string;
@@ -62,6 +64,8 @@ export interface MySubscription {
   extra_users: number;
   seat_limit: number;
   seats_used: number;
+  max_branches?: number | null;
+  branches_used?: number;
   status: SubscriptionStatus;
   state: AccessState;
   current_period_end: string;

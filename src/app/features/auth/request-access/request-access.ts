@@ -6,11 +6,10 @@ import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { TextareaModule } from 'primeng/textarea';
 import { MessageModule } from 'primeng/message';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { Plan } from '../../../core/models/subscription.model';
 import { FieldError } from '../../../shared/components/field-error/field-error';
 import { phoneValidator } from '../../../shared/utils/validators';
-import { unwrap } from '../../../shared/utils/db';
 
 /**
  * Formulario público de solicitud de acceso para una empresa nueva.
@@ -23,7 +22,7 @@ import { unwrap } from '../../../shared/utils/db';
   styleUrls: ['../auth-shell.scss', './request-access.scss'],
 })
 export class RequestAccess implements OnInit {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   protected readonly plans = signal<Plan[]>([]);
   protected readonly loading = signal(false);
@@ -42,7 +41,7 @@ export class RequestAccess implements OnInit {
 
   async ngOnInit(): Promise<void> {
     try {
-      this.plans.set(unwrap(await this.db.from('plans').select('*').eq('active', true).order('position')) as Plan[]);
+      this.plans.set(await this.api.get<Plan[]>('Plataforma/planes'));
     } catch {
       // Sin planes visibles el formulario sigue funcionando.
     }
@@ -57,17 +56,15 @@ export class RequestAccess implements OnInit {
     this.error.set(null);
     try {
       const v = this.form.getRawValue();
-      unwrap(
-        await this.db.rpc('submit_access_request', {
-          p_company_name: v.company_name,
-          p_tax_id: v.tax_id,
-          p_contact_name: v.contact_name,
-          p_email: v.email,
-          p_phone: v.phone,
-          p_plan_code: v.plan_code,
-          p_message: v.message,
-        }),
-      );
+      await this.api.procesar('Plataforma/solicitaracceso', {
+        company_name: v.company_name,
+        tax_id: v.tax_id || null,
+        contact_name: v.contact_name,
+        email: v.email,
+        phone: v.phone || null,
+        plan_code: v.plan_code || null,
+        message: v.message || null,
+      });
       this.sent.set(true);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'No se pudo enviar la solicitud.');

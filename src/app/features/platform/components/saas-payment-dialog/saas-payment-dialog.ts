@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -130,8 +130,11 @@ export class SaasPaymentDialog {
     effect(() => {
       if (!this.visible()) return;
       const o = this.org();
-      this.form.reset({ plan_code: o?.plan_code ?? '', months: 1, amount: 0, method: 'YAPE', paid_at: new Date(), reference: '' });
-      this.suggestAmount();
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
+      untracked(() => {
+        this.form.reset({ plan_code: o?.plan_code ?? '', months: 1, amount: 0, method: 'YAPE', paid_at: new Date(), reference: '' });
+        this.suggestAmount();
+      });
     });
     this.form.controls.plan_code.valueChanges.subscribe(() => this.suggestAmount());
     this.form.controls.months.valueChanges.subscribe(() => this.suggestAmount());

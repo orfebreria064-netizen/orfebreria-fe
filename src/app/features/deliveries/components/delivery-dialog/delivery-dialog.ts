@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, model, output, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, inject, input, model, output, signal, untracked, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -23,7 +23,7 @@ import { OrdersService } from '../../../orders/services/orders.service';
 import { Delivery } from '../../models/delivery.model';
 import { DeliveriesService } from '../../services/deliveries.service';
 
-type OrderInfo = Pick<Order, 'id' | 'number' | 'title' | 'total' | 'amount_paid' | 'balance' | 'qc_approved' | 'status'>;
+type OrderInfo = Pick<Order, 'id' | 'number' | 'title' | 'total' | 'amount_paid' | 'balance' | 'currency' | 'qc_approved' | 'status'>;
 
 /** Programar o registrar una entrega (conformidad, receptor y firma opcional). */
 @Component({
@@ -89,19 +89,22 @@ export class DeliveryDialog {
       if (!this.visible()) return;
       const d = this.delivery();
       const fixedOrder = d?.order_id ?? this.orderId();
-      this.form.reset({
-        order_id: fixedOrder,
-        status: this.markDelivered() ? 'ENTREGADA' : (d?.status ?? 'PENDIENTE'),
-        scheduled_date: fromIsoDate(d?.scheduled_date) ?? new Date(),
-        delivered_at: d?.delivered_at ? new Date(d.delivered_at) : this.markDelivered() ? new Date() : null,
-        responsible_id: d?.responsible_id ?? this.auth.profile()?.id ?? null,
-        received_by: d?.received_by ?? '',
-        conformity: d?.conformity ?? (this.markDelivered() ? true : null),
-        conformity_notes: d?.conformity_notes ?? '',
-        notes: d?.notes ?? '',
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
+      untracked(() => {
+        this.form.reset({
+          order_id: fixedOrder,
+          status: this.markDelivered() ? 'ENTREGADA' : (d?.status ?? 'PENDIENTE'),
+          scheduled_date: fromIsoDate(d?.scheduled_date) ?? new Date(),
+          delivered_at: d?.delivered_at ? new Date(d.delivered_at) : this.markDelivered() ? new Date() : null,
+          responsible_id: d?.responsible_id ?? this.auth.profile()?.id ?? null,
+          received_by: d?.received_by ?? '',
+          conformity: d?.conformity ?? (this.markDelivered() ? true : null),
+          conformity_notes: d?.conformity_notes ?? '',
+          notes: d?.notes ?? '',
+        });
+        this.order.set(null);
+        if (fixedOrder) void this.loadOrder(fixedOrder);
       });
-      this.order.set(null);
-      if (fixedOrder) void this.loadOrder(fixedOrder);
     });
     this.form.controls.status.valueChanges.subscribe((status) => {
       const { conformity, delivered_at } = this.form.controls;

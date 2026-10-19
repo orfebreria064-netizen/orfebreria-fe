@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -113,8 +113,12 @@ export class RequestDialog {
   constructor() {
     effect(() => {
       if (!this.visible()) return;
-      this.approveForm.reset({ plan_code: this.request()?.plan_code ?? 'BASICO', trial_days: 14 });
-      this.rejectForm.reset({ reason: '' });
+      const planCode = this.request()?.plan_code ?? 'BASICO';
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
+      untracked(() => {
+        this.approveForm.reset({ plan_code: planCode, trial_days: 14 });
+        this.rejectForm.reset({ reason: '' });
+      });
     });
   }
 

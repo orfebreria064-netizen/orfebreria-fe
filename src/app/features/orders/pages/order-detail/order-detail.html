@@ -8,7 +8,7 @@
       <span><i class="pi pi-user"></i> <a class="link" [routerLink]="['/customers', o.customer_id]">{{ o.customer?.full_name }}</a></span>
       <span><i class="pi pi-calendar"></i> Entrega: {{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : 'sin fecha' }}</span>
       @if (canSeeMoney) {
-        <span><i class="pi pi-wallet"></i> Saldo: <strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></span>
+        <span><i class="pi pi-wallet"></i> Saldo: <strong [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</strong></span>
       }
     </div>
 
@@ -27,6 +27,9 @@
     @if (canSeeMoney && !locked()) {
       <p-button label="Registrar pago" icon="pi pi-wallet" (onClick)="openPayment()" />
     }
+    @if (canSeeMoney) {
+      <p-button label="Proforma" icon="pi pi-print" severity="secondary" [outlined]="true" [loading]="printingProforma()" (onClick)="printProforma()" class="hide-sm" />
+    }
     @if (!locked()) {
       <p-button label="Registrar material" icon="pi pi-box" severity="secondary" [outlined]="true" (onClick)="openMaterial()" class="hide-sm" />
       <p-button label="Subir archivo" icon="pi pi-upload" severity="secondary" [outlined]="true" (onClick)="openFiles()" class="hide-sm" />
@@ -40,6 +43,9 @@
       <p-tablist>
         <p-tab value="summary"><i class="pi pi-th-large"></i> Resumen</p-tab>
         <p-tab value="production"><i class="pi pi-cog"></i> Producción</p-tab>
+        @if (canWorkshop) {
+          <p-tab value="workshop"><i class="pi pi-hammer"></i> Taller</p-tab>
+        }
         <p-tab value="materials"><i class="pi pi-box"></i> Materiales</p-tab>
         @if (canSeeMoney) {
           <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos</p-tab>
@@ -64,6 +70,11 @@
         <p-tabpanel value="production">
           <app-order-production [order]="o" [stages]="stages()" [locked]="locked()" (changed)="load()" />
         </p-tabpanel>
+        @if (canWorkshop) {
+          <p-tabpanel value="workshop">
+            <app-order-workshop [order]="o" [locked]="locked()" (changed)="load()" />
+          </p-tabpanel>
+        }
         <p-tabpanel value="materials">
           <app-order-materials [orderId]="o.id" [readonly]="locked()" [(dialog)]="materialDialog" (changed)="refreshHistory()" />
         </p-tabpanel>

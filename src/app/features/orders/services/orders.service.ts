@@ -1,15 +1,9 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { OrderStatus, Priority } from '../../../core/models/domain';
-import { todayIso, unwrap } from '../../../shared/utils/db';
-import { OrderDetail, OrderHeaderInput, OrderHistoryEntry, OrderItem, OrderRow } from '../models/order.model';
-
-export const ORDER_ROW_SELECT =
-  '*, customer:customers(id, full_name), service_type:service_types(name), assignee:profiles!orders_assigned_to_fkey(id, full_name)';
-const ORDER_DETAIL_SELECT =
-  '*, items:order_items(*), service_type:service_types(name), assignee:profiles!orders_assigned_to_fkey(id, full_name), ' +
-  'quotation:quotations!orders_quotation_id_fkey(id, number), ' +
-  'customer:customers(id, full_name, document_type, document_number, phone, whatsapp, email, address)';
+import { mapHistory, mapOrderDetail, mapOrderRow } from '../../../shared/utils/api-mappers';
+import { emptyToNull } from '../../../shared/utils/db';
+import { OrderDetail, OrderHeaderInput, OrderHistoryEntry, OrderItem, OrderRow, ProductionOrderInput } from '../models/order.model';
 
 export interface OrderFilters {
   statuses?: OrderStatus[];
@@ -17,6 +11,20 @@ export interface OrderFilters {
   assignedTo?: string | null;
   overdueOnly?: boolean;
   serviceTypeId?: string | null;
+}
+
+/** Pedido completo de Pedido/traeruno (cabecera, ítems, etapas, historial, pagos, entregas, adjuntos, material del cliente). */
+export interface OrderSheet {
+  pedido: Record<string, unknown>;
+  items: OrderItem[];
+  etapas: Record<string, unknown>[];
+  historial: Record<string, unknown>[];
+  pagos: Record<string, unknown>[];
+  entregas: Record<string, unknown>[];
+  adjuntos: Record<string, unknown>[];
+  material_cliente: Record<string, unknown>[];
+  /** Recibos de egreso del pedido (solo ADMIN y GERENTE; vacío para el resto). */
+  pagos_joyero: Record<string, unknown>[];
 }
 
 /**
@@ -39,55 +47,72 @@ export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 
 @Injectable({ providedIn: 'root' })
 export class OrdersService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async list(filters: OrderFilters = {}): Promise<OrderRow[]> {
-    let query = this.db.from('orders').select(ORDER_ROW_SELECT).order('created_at', { ascending: false });
-    if (filters.statuses?.length) query = query.in('status', filters.statuses);
-    if (filters.assignedTo) query = query.eq('assigned_to', filters.assignedTo);
-    if (filters.serviceTypeId) query = query.eq('service_type_id', filters.serviceTypeId);
-    if (filters.overdueOnly) {
-      query = query.lt('due_date', todayIso()).not('status', 'in', '(ENTREGADO,CERRADO,CANCELADO,PAUSADO)');
-    }
-    const term = filters.search?.trim().replace(/[%,()]/g, ' ');
-    if (term) query = query.or(`number.ilike.%${term}%,title.ilike.%${term}%`);
-    return unwrap(await query) as OrderRow[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Pedido/listarpedidos', {
+      statuses: filters.statuses?.length ? filters.statuses : null,
+      assigned_to: filters.assignedTo ?? null,
+      service_type_id: filters.serviceTypeId ?? null,
+      overdue_only: filters.overdueOnly ?? false,
+      search: filters.search?.trim() || null,
+    });
+    return rows.map(mapOrderRow);
   }
 
   /** Búsqueda ligera para selects (pagos, movimientos, entregas). */
   async search(term: string, options: { excludeStatuses?: OrderStatus[] } = {}): Promise<OrderRow[]> {
-    let query = this.db.from('orders').select(ORDER_ROW_SELECT).order('created_at', { ascending: false }).limit(20);
-    if (options.excludeStatuses?.length) query = query.not('status', 'in', `(${options.excludeStatuses.join(',')})`);
-    const clean = term.trim().replace(/[%,()]/g, ' ');
-    if (clean) query = query.or(`number.ilike.%${clean}%,title.ilike.%${clean}%`);
-    return unwrap(await query) as OrderRow[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Pedido/listarpedidos', {
+      search: term.trim() || null,
+      exclude_statuses: options.excludeStatuses?.length ? options.excludeStatuses : null,
+      limit: 20,
+    });
+    return rows.map(mapOrderRow);
+  }
+
+  /** Pedido completo tal como lo devuelve la API (lo reutilizan producción, pagos y entregas). */
+  sheet(id: string): Promise<OrderSheet> {
+    return this.api.get<OrderSheet>(`Pedido/traeruno/${id}`);
   }
 
   async get(id: string): Promise<OrderDetail> {
-    const order = unwrap(await this.db.from('orders').select(ORDER_DETAIL_SELECT).eq('id', id).single()) as OrderDetail;
-    order.items = [...order.items].sort((a, b) => a.position - b.position);
-    return order;
+    const r = await this.sheet(id);
+    return mapOrderDetail(r.pedido, r.items);
   }
 
   async save(id: string | null, header: OrderHeaderInput, items: OrderItem[]): Promise<string> {
-    return unwrap(await this.db.rpc('save_order', { p_id: id, p_header: header, p_items: items })) as string;
+    return (await this.api.procesar('Pedido/pedidoprc', { id, header, items })).resultProceso!;
   }
 
   async setStatus(id: string, status: OrderStatus): Promise<void> {
-    unwrap(await this.db.from('orders').update({ status }).eq('id', id));
+    await this.api.procesar('Pedido/cambiarestado', { id, status });
   }
 
   async assign(id: string, userId: string | null): Promise<void> {
-    unwrap(await this.db.from('orders').update({ assigned_to: userId }).eq('id', id));
+    await this.api.procesar('Pedido/asignar', { id, assigned_to: userId });
   }
 
+  /** La API recibe fecha y prioridad juntas: lo que no viene en el cambio conserva su valor actual. */
   async updateSchedule(id: string, patch: { due_date?: string | null; priority?: Priority }): Promise<void> {
-    unwrap(await this.db.from('orders').update(patch).eq('id', id));
+    const actual = (await this.sheet(id)).pedido;
+    await this.api.procesar('Pedido/cronograma', {
+      id,
+      due_date: 'due_date' in patch ? patch.due_date : actual['due_date'],
+      priority: patch.priority ?? actual['priority'],
+    });
   }
 
   async history(orderId: string): Promise<OrderHistoryEntry[]> {
-    return unwrap(
-      await this.db.from('order_history').select('*').eq('order_id', orderId).order('created_at', { ascending: false }),
-    ) as OrderHistoryEntry[];
+    return (await this.sheet(orderId)).historial.map(mapHistory);
+  }
+
+  /** Proforma (PRO) u orden de producción (OP): la primera emisión asigna el número; luego se reutiliza. */
+  async issueDocument(orderId: string, docType: 'PRO' | 'OP'): Promise<string> {
+    return (await this.api.procesar('Pedido/emitirdocumento', { order_id: orderId, doc_type: docType })).resultProceso!;
+  }
+
+  /** Datos del taller: joyero, material entregado, indicaciones y acabado (se envían todos los campos). */
+  async saveProduction(input: ProductionOrderInput): Promise<void> {
+    await this.api.procesar('Pedido/ordenproduccion', emptyToNull(input));
   }
 }

@@ -1,5 +1,5 @@
 export const environment = {
   production: false,
-  supabaseUrl: 'https://ynxnxdgzsykhobfujyio.supabase.co',
-  supabaseKey: 'sb_publishable_L_-KyV1pMz4nPbwP0rTklQ_YqbDQZuy',
+  /** API AURUM (aurum-be). En desarrollo: dotnet run en AURUM.WebAPI. */
+  apiUrl: 'http://localhost:5227/api',
 };

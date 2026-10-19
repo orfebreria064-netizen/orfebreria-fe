@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
-import { emptyToNull, unwrap } from '../../../shared/utils/db';
+import { ApiService } from '../../../core/services/api.service';
+import { emptyToNull } from '../../../shared/utils/db';
+import { mapHistory, mapOrderRow, mapPayment, mapQuotationRow, orEmpty } from '../../../shared/utils/api-mappers';
 import { Customer, CustomerContact, CustomerInput, CustomerOption, CustomerStats } from '../models/customer.model';
 import { QuotationRow } from '../../quotations/models/quotation.model';
 import { OrderHistoryEntry, OrderRow } from '../../orders/models/order.model';
@@ -11,112 +12,91 @@ export interface CustomerFilters {
   includeInactive?: boolean;
 }
 
+/** Ficha 360° de Cliente/traeruno: cliente, resumen, contactos y pedidos. */
+interface CustomerSheet {
+  cliente: Customer;
+  resumen: Omit<CustomerStats, 'customer_id'> | null;
+  contactos: Omit<CustomerContact, 'customer_id'>[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class CustomersService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async list(filters: CustomerFilters = {}): Promise<Customer[]> {
-    let query = this.db.from('customers').select('*').order('full_name');
-    if (!filters.includeInactive) query = query.eq('active', true);
-    const term = filters.search?.trim().replace(/[%,()]/g, ' ');
-    if (term) {
-      query = query.or(
-        `full_name.ilike.%${term}%,document_number.ilike.%${term}%,phone.ilike.%${term}%,email.ilike.%${term}%`,
-      );
-    }
-    return unwrap(await query) as Customer[];
+    return this.api.post<Customer[]>('Cliente/listarclientes', {
+      search: filters.search?.trim() || null,
+      include_inactive: filters.includeInactive ?? false,
+    });
   }
 
   /** Búsqueda ligera para selects de cliente en cotizaciones/pedidos. */
   async search(term: string, limit = 20): Promise<CustomerOption[]> {
-    let query = this.db
-      .from('customers')
-      .select('id, full_name, document_number, phone')
-      .eq('active', true)
-      .order('full_name')
-      .limit(limit);
-    const clean = term.trim().replace(/[%,()]/g, ' ');
-    if (clean) query = query.or(`full_name.ilike.%${clean}%,document_number.ilike.%${clean}%`);
-    return unwrap(await query) as CustomerOption[];
+    const rows = await this.list({ search: term });
+    return rows.slice(0, limit).map(({ id, full_name, document_number, phone }) => ({ id, full_name, document_number, phone }));
   }
 
   async get(id: string): Promise<Customer> {
-    return unwrap(await this.db.from('customers').select('*').eq('id', id).single()) as Customer;
+    return (await this.sheet(id)).cliente;
   }
 
   async create(input: CustomerInput): Promise<Customer> {
-    return unwrap(await this.db.from('customers').insert(emptyToNull(input)).select().single()) as Customer;
+    const r = await this.api.procesar('Cliente/clienteprc', emptyToNull(input));
+    return this.get(r.resultProceso!);
   }
 
+  /** La API recibe el cliente completo: se combina el cambio con los datos actuales. */
   async update(id: string, input: Partial<CustomerInput>): Promise<Customer> {
-    return unwrap(await this.db.from('customers').update(emptyToNull(input)).eq('id', id).select().single()) as Customer;
+    const actual = await this.get(id);
+    await this.api.procesar('Cliente/clienteprc', { ...actual, ...emptyToNull(input), id });
+    return this.get(id);
   }
 
   /** Baja lógica (no se elimina información crítica). */
   async setActive(id: string, active: boolean): Promise<void> {
-    unwrap(await this.db.from('customers').update({ active }).eq('id', id));
+    await this.update(id, { active });
   }
 
   async stats(id: string): Promise<CustomerStats | null> {
-    return unwrap(await this.db.from('customer_stats').select('*').eq('customer_id', id).maybeSingle()) as CustomerStats | null;
+    const resumen = (await this.sheet(id)).resumen;
+    return resumen ? { ...resumen, customer_id: id } : null;
   }
 
   // ------------------------------------------------------------ Ficha 360°
   async quotations(customerId: string): Promise<QuotationRow[]> {
-    return unwrap(
-      await this.db
-        .from('quotations')
-        .select('*, customer:customers(id, full_name), service_type:service_types(name), order:orders!quotations_order_fk(id, number)')
-        .eq('customer_id', customerId)
-        .order('created_at', { ascending: false }),
-    ) as QuotationRow[];
+    const rows = await orEmpty(this.api.post<Record<string, unknown>[]>('Cotizacion/listarcotizaciones', { customer_id: customerId }));
+    return rows.map(mapQuotationRow);
   }
 
   async orders(customerId: string): Promise<OrderRow[]> {
-    return unwrap(
-      await this.db
-        .from('orders')
-        .select('*, customer:customers(id, full_name), service_type:service_types(name), assignee:profiles!orders_assigned_to_fkey(id, full_name)')
-        .eq('customer_id', customerId)
-        .order('created_at', { ascending: false }),
-    ) as OrderRow[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Pedido/listarpedidos', { customer_id: customerId });
+    return rows.map(mapOrderRow);
   }
 
   async payments(customerId: string): Promise<Payment[]> {
-    return unwrap(
-      await this.db
-        .from('payments')
-        .select('*, order:orders!inner(id, number, customer_id, customer:customers(id, full_name))')
-        .eq('order.customer_id', customerId)
-        .order('payment_date', { ascending: false }),
-    ) as Payment[];
+    const rows = await orEmpty(this.api.post<Record<string, unknown>[]>('Pago/listarpagos', { customer_id: customerId }));
+    return rows.map(mapPayment);
   }
 
   async history(customerId: string, limit = 100): Promise<OrderHistoryEntry[]> {
-    return unwrap(
-      await this.db
-        .from('order_history')
-        .select('*, order:orders!inner(number, customer_id)')
-        .eq('order.customer_id', customerId)
-        .order('created_at', { ascending: false })
-        .limit(limit),
-    ) as OrderHistoryEntry[];
+    const rows = await this.api.get<Record<string, unknown>[]>(`Cliente/historial/${customerId}`, { limite: limit });
+    return rows.map(mapHistory);
   }
 
   // ------------------------------------------------------------ Contactos
   async contacts(customerId: string): Promise<CustomerContact[]> {
-    return unwrap(
-      await this.db.from('customer_contacts').select('*').eq('customer_id', customerId).order('name'),
-    ) as CustomerContact[];
+    return (await this.sheet(customerId)).contactos.map((c) => ({ ...c, customer_id: customerId }));
   }
 
   async saveContact(contact: Omit<CustomerContact, 'id'> & { id?: string }): Promise<void> {
-    const { id, ...data } = emptyToNull(contact);
-    if (id) unwrap(await this.db.from('customer_contacts').update(data).eq('id', id));
-    else unwrap(await this.db.from('customer_contacts').insert(data));
+    await this.api.procesar('Cliente/contactoprc', emptyToNull(contact));
   }
 
   async deleteContact(id: string): Promise<void> {
-    unwrap(await this.db.from('customer_contacts').delete().eq('id', id));
+    await this.api.procesar(`Cliente/eliminarcontacto/${id}`);
+  }
+
+  private sheet(id: string): Promise<CustomerSheet> {
+    return this.api.get<CustomerSheet>(`Cliente/traeruno/${id}`);
   }
 }

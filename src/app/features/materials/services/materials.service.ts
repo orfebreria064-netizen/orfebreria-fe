@@ -1,11 +1,17 @@
 import { Injectable, inject } from '@angular/core';
-import { SupabaseService } from '../../../core/services/supabase.service';
+import { ApiService } from '../../../core/services/api.service';
 import { MaterialType, MovementType } from '../../../core/models/domain';
-import { emptyToNull, unwrap } from '../../../shared/utils/db';
-import { ClientMaterialBalance, Material, MaterialInput, MaterialMovement, MovementInput } from '../models/material.model';
-
-const MOVEMENT_SELECT =
-  '*, material:materials(id, name, purity, unit), order:orders(id, number), creator:profiles!material_movements_created_by_fkey(full_name)';
+import { AppError, emptyToNull } from '../../../shared/utils/db';
+import { mapMovement } from '../../../shared/utils/api-mappers';
+import {
+  ClientMaterialBalance,
+  Material,
+  MaterialInput,
+  MaterialMovement,
+  MaterialPrice,
+  MaterialPriceHistory,
+  MovementInput,
+} from '../models/material.model';
 
 export interface MovementFilters {
   materialId?: string;
@@ -16,55 +22,68 @@ export interface MovementFilters {
   limit?: number;
 }
 
+/** Materiales. Sin sucursal, stock y mínimo son el consolidado de la empresa. */
 @Injectable({ providedIn: 'root' })
 export class MaterialsService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async list(options: { includeInactive?: boolean; type?: MaterialType | null } = {}): Promise<Material[]> {
-    let query = this.db.from('materials').select('*').order('type').order('name');
-    if (!options.includeInactive) query = query.eq('active', true);
-    if (options.type) query = query.eq('type', options.type);
-    return unwrap(await query) as Material[];
+    return this.api.post<Material[]>('Material/listarmateriales', {
+      include_inactive: options.includeInactive ?? false,
+      type: options.type ?? null,
+    });
+  }
+
+  /** Precio vigente de cada material activo, con el anterior para ver la variación. */
+  async currentPrices(): Promise<MaterialPrice[]> {
+    return this.api.get<MaterialPrice[]>('Material/preciosvigentes');
+  }
+
+  /** Registra (o corrige) los precios de una fecha; por defecto, hoy. */
+  async savePrices(prices: { material_id: string; price: number }[], priceDate: string | null = null): Promise<void> {
+    await this.api.procesar('Material/registrarprecios', { price_date: priceDate, prices });
+  }
+
+  async priceHistory(materialId: string): Promise<MaterialPriceHistory[]> {
+    return this.api.get<MaterialPriceHistory[]>(`Material/historialprecios/${materialId}`);
   }
 
   async get(id: string): Promise<Material> {
-    return unwrap(await this.db.from('materials').select('*').eq('id', id).single()) as Material;
+    const material = (await this.list({ includeInactive: true })).find((m) => m.id === id);
+    if (!material) throw new AppError('Material no encontrado.');
+    return material;
   }
 
-  async create(input: MaterialInput): Promise<Material> {
-    return unwrap(await this.db.from('materials').insert(emptyToNull(input)).select().single()) as Material;
+  /** El stock inicial se registra como movimiento de entrada "Stock inicial" en la sucursal del usuario. */
+  async create(input: MaterialInput): Promise<string | null> {
+    const { stock, ...data } = emptyToNull(input);
+    const r = await this.api.procesar<{ id: string }>('Material/materialprc', { ...data, initial_stock: stock ?? 0 });
+    return r.data?.id ?? null;
   }
 
   /** El stock no se edita aquí: solo mediante movimientos. */
-  async update(id: string, input: Omit<MaterialInput, 'stock'>): Promise<Material> {
-    return unwrap(await this.db.from('materials').update(emptyToNull(input)).eq('id', id).select().single()) as Material;
+  async update(id: string, input: Omit<MaterialInput, 'stock'>): Promise<void> {
+    await this.api.procesar('Material/materialprc', { ...emptyToNull(input), id });
   }
 
   async movements(filters: MovementFilters = {}): Promise<MaterialMovement[]> {
-    let query = this.db
-      .from('material_movements')
-      .select(MOVEMENT_SELECT)
-      .order('movement_date', { ascending: false })
-      .order('created_at', { ascending: false })
-      .limit(filters.limit ?? 500);
-    if (filters.materialId) query = query.eq('material_id', filters.materialId);
-    if (filters.orderId) query = query.eq('order_id', filters.orderId);
-    if (filters.type) query = query.eq('movement_type', filters.type);
-    if (filters.from) query = query.gte('movement_date', filters.from);
-    if (filters.to) query = query.lte('movement_date', filters.to);
-    return unwrap(await query) as MaterialMovement[];
+    const rows = await this.api.post<Record<string, unknown>[]>('Material/kardex', {
+      material_id: filters.materialId ?? null,
+      order_id: filters.orderId ?? null,
+      movement_type: filters.type ?? null,
+      from: filters.from ?? null,
+      to: filters.to ?? null,
+      limit: filters.limit ?? 500,
+    });
+    return rows.map(mapMovement);
   }
 
   /** Registra un movimiento. La base de datos valida stock suficiente y actualiza el stock. */
-  async addMovement(input: MovementInput): Promise<MaterialMovement> {
-    return unwrap(
-      await this.db.from('material_movements').insert(emptyToNull(input)).select(MOVEMENT_SELECT).single(),
-    ) as MaterialMovement;
+  async addMovement(input: MovementInput): Promise<void> {
+    await this.api.procesar('Material/registrarmovimiento', emptyToNull(input));
   }
 
   async clientBalances(orderId: string): Promise<ClientMaterialBalance[]> {
-    return unwrap(
-      await this.db.from('order_client_materials').select('*').eq('order_id', orderId).order('material_name'),
-    ) as ClientMaterialBalance[];
+    return this.api.get<ClientMaterialBalance[]>(`Material/materialcliente/${orderId}`);
   }
 }

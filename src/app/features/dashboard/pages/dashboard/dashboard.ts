@@ -49,6 +49,11 @@ export class Dashboard implements OnInit {
   protected readonly labels = ORDER_STATUS_LABELS;
   protected readonly severities = ORDER_STATUS_SEVERITY;
   protected readonly money = formatMoney;
+
+  /** Monto en soles y, si hay pedidos en dólares, también su monto en US$. */
+  protected withUsd(pen: number, usd: number | null | undefined): string {
+    return Number(usd) ? `${formatMoney(pen)} · ${formatMoney(usd, 'USD')}` : formatMoney(pen);
+  }
   protected readonly compactMoney = compactMoney;
   protected readonly integer = integer;
   protected readonly today = new Date();
@@ -75,8 +80,8 @@ export class Dashboard implements OnInit {
         return `${MONTHS[m - 1]} ${String(y).slice(2)}`;
       }),
       series: [
-        { label: 'Ventas', values: sales, color: SERIES.primary },
-        { label: 'Cobrado', values: collected, color: SERIES.secondary },
+        { label: 'Ventas (S/)', values: sales, color: SERIES.primary },
+        { label: 'Cobrado (S/)', values: collected, color: SERIES.secondary },
       ] as ChartSeries[],
       summary: [
         { label: 'Ventas del periodo', value: formatMoney(totalSales), color: SERIES.primary },

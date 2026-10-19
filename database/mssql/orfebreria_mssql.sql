@@ -385,6 +385,25 @@ BEGIN
 END
 GO
 
+-- Precio de venta del día por material (S/ por unidad: gramo, quilate o unidad).
+-- Lo registra la empresa; rige el último con fecha <= hoy.
+IF OBJECT_ID(N'dbo.material_prices', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.material_prices (
+    id           UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_material_prices PRIMARY KEY DEFAULT NEWID(),
+    org_id       UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_material_prices_org REFERENCES dbo.organizations (id),
+    material_id  UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_material_prices_material REFERENCES dbo.materials (id) ON DELETE CASCADE,
+    price_date   DATE             NOT NULL,
+    price        DECIMAL(12, 2)   NOT NULL CONSTRAINT CK_material_prices_price CHECK (price > 0),
+    created_by   UNIQUEIDENTIFIER NULL CONSTRAINT FK_material_prices_by REFERENCES dbo.users (id),
+    created_at   DATETIMEOFFSET(3) NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    updated_at   DATETIMEOFFSET(3) NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    CONSTRAINT UQ_material_prices_day UNIQUE (material_id, price_date)
+  );
+  CREATE INDEX IX_material_prices_org ON dbo.material_prices (org_id, price_date DESC);
+END
+GO
+
 -- ---------------------------------------------------------------------
 -- Cotizaciones
 -- ---------------------------------------------------------------------
@@ -827,6 +846,148 @@ SELECT mm.order_id,
  GROUP BY mm.order_id, mm.material_id, m.name, m.purity, m.unit;
 GO
 
+/* =====================================================================
+   1b. DOCUMENTOS COMERCIALES (cotización, proforma, orden de producción,
+       recibos de ingreso y de egreso) y joyeros externos.
+       Cambios idempotentes: sirven para una base nueva y para una existente.
+   ===================================================================== */
+
+-- Joyeros externos (no usan el sistema). Se les paga por pedido.
+IF OBJECT_ID(N'dbo.jewelers', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.jewelers (
+    id               UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_jewelers PRIMARY KEY DEFAULT NEWID(),
+    org_id           UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_jewelers_org REFERENCES dbo.organizations (id),
+    full_name        NVARCHAR(150)    NOT NULL CONSTRAINT CK_jewelers_name CHECK (LEN(LTRIM(full_name)) > 0),
+    document_number  NVARCHAR(20)     NULL,
+    phone            NVARCHAR(30)     NULL,
+    specialty        NVARCHAR(100)    NULL,
+    notes            NVARCHAR(1000)   NULL,
+    active           BIT              NOT NULL DEFAULT 1,
+    created_at       DATETIMEOFFSET(3) NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    updated_at       DATETIMEOFFSET(3) NOT NULL DEFAULT SYSDATETIMEOFFSET()
+  );
+  CREATE INDEX IX_jewelers_org ON dbo.jewelers (org_id, active);
+  CREATE UNIQUE INDEX UX_jewelers_document ON dbo.jewelers (org_id, document_number)
+    WHERE document_number IS NOT NULL;
+END
+GO
+
+-- Configuración: datos de marca para los documentos impresos
+IF COL_LENGTH(N'dbo.settings', N'logo') IS NULL
+  ALTER TABLE dbo.settings ADD logo NVARCHAR(MAX) NULL;           -- data URL (PNG/JPEG)
+IF COL_LENGTH(N'dbo.settings', N'slogan') IS NULL
+  ALTER TABLE dbo.settings ADD slogan NVARCHAR(500) NULL;         -- una línea por viñeta
+IF COL_LENGTH(N'dbo.settings', N'mobile') IS NULL
+  ALTER TABLE dbo.settings ADD mobile NVARCHAR(80) NULL;          -- Cel. / RPC
+IF COL_LENGTH(N'dbo.settings', N'city') IS NULL
+  ALTER TABLE dbo.settings ADD city NVARCHAR(60) NULL;            -- "Lima, 16 de octubre del 2026"
+GO
+
+-- Numeración: PRO proforma · OP orden de producción · RI recibo de ingreso · RE recibo de egreso
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_docseq_type'
+             AND definition NOT LIKE N'%''RE''%')
+  ALTER TABLE dbo.document_sequences DROP CONSTRAINT CK_docseq_type;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_docseq_type')
+  ALTER TABLE dbo.document_sequences ADD CONSTRAINT CK_docseq_type
+    CHECK (doc_type IN (N'COT', N'PED', N'ENT', N'PRO', N'OP', N'RI', N'RE'));
+GO
+
+-- Moneda por documento (S/ o US$) y peso en gramos por ítem
+IF COL_LENGTH(N'dbo.quotations', N'currency') IS NULL
+  ALTER TABLE dbo.quotations ADD currency NVARCHAR(3) NOT NULL CONSTRAINT DF_quotations_currency DEFAULT N'PEN'
+    CONSTRAINT CK_quotations_currency CHECK (currency IN (N'PEN', N'USD'));
+IF COL_LENGTH(N'dbo.orders', N'currency') IS NULL
+  ALTER TABLE dbo.orders ADD currency NVARCHAR(3) NOT NULL CONSTRAINT DF_orders_currency DEFAULT N'PEN'
+    CONSTRAINT CK_orders_currency CHECK (currency IN (N'PEN', N'USD'));
+IF COL_LENGTH(N'dbo.quotation_items', N'weight') IS NULL
+  ALTER TABLE dbo.quotation_items ADD weight DECIMAL(10, 2) NULL CONSTRAINT CK_quotation_items_weight CHECK (weight IS NULL OR weight > 0);
+IF COL_LENGTH(N'dbo.order_items', N'weight') IS NULL
+  ALTER TABLE dbo.order_items ADD weight DECIMAL(10, 2) NULL CONSTRAINT CK_order_items_weight CHECK (weight IS NULL OR weight > 0);
+GO
+
+-- Pedido: proforma y orden de producción (taller)
+IF COL_LENGTH(N'dbo.orders', N'proforma_number') IS NULL
+  ALTER TABLE dbo.orders ADD proforma_number NVARCHAR(30) NULL, proforma_issued_at DATETIMEOFFSET(3) NULL;
+IF COL_LENGTH(N'dbo.orders', N'production_number') IS NULL
+  ALTER TABLE dbo.orders ADD
+    production_number        NVARCHAR(30)     NULL,
+    production_issued_at     DATETIMEOFFSET(3) NULL,
+    jeweler_id               UNIQUEIDENTIFIER NULL CONSTRAINT FK_orders_jeweler REFERENCES dbo.jewelers (id),
+    material_delivered_at    DATE             NULL,     -- fecha de entrega del material al joyero
+    material_weight_out      DECIMAL(10, 2)   NULL CONSTRAINT CK_orders_weight_out CHECK (material_weight_out IS NULL OR material_weight_out > 0),
+    production_instructions  NVARCHAR(2000)   NULL,     -- indicaciones
+    product_delivered_at     DATE             NULL,     -- fecha de entrega del producto (acabado)
+    weight_returned          DECIMAL(10, 2)   NULL CONSTRAINT CK_orders_weight_returned CHECK (weight_returned IS NULL OR weight_returned > 0),
+    production_notes         NVARCHAR(1000)   NULL;     -- observaciones del acabado
+GO
+IF COL_LENGTH(N'dbo.orders', N'waste_weight') IS NULL
+  ALTER TABLE dbo.orders ADD waste_weight AS CAST(material_weight_out - weight_returned AS DECIMAL(10, 2)) PERSISTED;  -- merma
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_orders_proforma')
+  CREATE UNIQUE INDEX UX_orders_proforma ON dbo.orders (org_id, proforma_number) WHERE proforma_number IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_orders_production')
+  CREATE UNIQUE INDEX UX_orders_production ON dbo.orders (org_id, production_number) WHERE production_number IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_orders_jeweler')
+  CREATE INDEX IX_orders_jeweler ON dbo.orders (jeweler_id) WHERE jeweler_id IS NOT NULL;
+GO
+
+-- Pagos: moneda (la del pedido), recibo de ingreso, quién entrega el dinero y cheque
+IF COL_LENGTH(N'dbo.payments', N'currency') IS NULL
+  ALTER TABLE dbo.payments ADD currency NVARCHAR(3) NOT NULL CONSTRAINT DF_payments_currency DEFAULT N'PEN'
+    CONSTRAINT CK_payments_currency CHECK (currency IN (N'PEN', N'USD'));
+IF COL_LENGTH(N'dbo.payments', N'receipt_number') IS NULL
+  ALTER TABLE dbo.payments ADD receipt_number NVARCHAR(30) NULL, received_from NVARCHAR(150) NULL;
+GO
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_payments_receipt')
+  CREATE UNIQUE INDEX UX_payments_receipt ON dbo.payments (org_id, receipt_number) WHERE receipt_number IS NOT NULL;
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_payments_method' AND definition NOT LIKE N'%CHEQUE%')
+  ALTER TABLE dbo.payments DROP CONSTRAINT CK_payments_method;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_payments_method')
+  ALTER TABLE dbo.payments ADD CONSTRAINT CK_payments_method
+    CHECK (method IN (N'EFECTIVO', N'YAPE', N'PLIN', N'TRANSFERENCIA', N'TARJETA', N'CHEQUE', N'OTRO'));
+GO
+
+-- Historial del pedido: emisión de documentos y pagos a joyeros
+IF EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_order_history_type' AND definition NOT LIKE N'%EGRESO%')
+  ALTER TABLE dbo.order_history DROP CONSTRAINT CK_order_history_type;
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_order_history_type')
+  ALTER TABLE dbo.order_history ADD CONSTRAINT CK_order_history_type
+    CHECK (event_type IN (N'CREACION', N'MODIFICACION', N'ESTADO', N'RESPONSABLE', N'PRODUCCION',
+                          N'PAGO', N'MATERIAL', N'ARCHIVO', N'ENTREGA', N'CIERRE', N'DOCUMENTO', N'EGRESO'));
+GO
+
+-- Recibos de egreso: pagos a joyeros (siempre ligados a un pedido). No se eliminan: se anulan.
+IF OBJECT_ID(N'dbo.jeweler_payments', N'U') IS NULL
+BEGIN
+  CREATE TABLE dbo.jeweler_payments (
+    id            UNIQUEIDENTIFIER NOT NULL CONSTRAINT PK_jeweler_payments PRIMARY KEY DEFAULT NEWID(),
+    org_id        UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_jp_org REFERENCES dbo.organizations (id),
+    branch_id     UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_jp_branch REFERENCES dbo.branches (id),
+    number        NVARCHAR(30)     NOT NULL,
+    jeweler_id    UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_jp_jeweler REFERENCES dbo.jewelers (id),
+    order_id      UNIQUEIDENTIFIER NOT NULL CONSTRAINT FK_jp_order REFERENCES dbo.orders (id),
+    payment_date  DATE             NOT NULL,
+    amount        DECIMAL(12, 2)   NOT NULL CONSTRAINT CK_jp_amount CHECK (amount > 0),
+    currency      NVARCHAR(3)      NOT NULL DEFAULT N'PEN' CONSTRAINT CK_jp_currency CHECK (currency IN (N'PEN', N'USD')),
+    method        NVARCHAR(20)     NOT NULL CONSTRAINT CK_jp_method
+                  CHECK (method IN (N'EFECTIVO', N'YAPE', N'PLIN', N'TRANSFERENCIA', N'TARJETA', N'CHEQUE', N'OTRO')),
+    reference     NVARCHAR(100)    NULL,
+    concept       NVARCHAR(1000)   NOT NULL CONSTRAINT CK_jp_concept CHECK (LEN(LTRIM(concept)) > 0),
+    voided        BIT              NOT NULL DEFAULT 0,
+    voided_at     DATETIMEOFFSET(3) NULL,
+    voided_by     UNIQUEIDENTIFIER NULL CONSTRAINT FK_jp_voided_by REFERENCES dbo.profiles (id),
+    void_reason   NVARCHAR(500)    NULL,
+    created_by    UNIQUEIDENTIFIER NULL CONSTRAINT FK_jp_created_by REFERENCES dbo.profiles (id),  -- autorizado por
+    created_at    DATETIMEOFFSET(3) NOT NULL DEFAULT SYSDATETIMEOFFSET(),
+    CONSTRAINT UQ_jeweler_payments_number UNIQUE (org_id, number)
+  );
+  CREATE INDEX IX_jp_jeweler ON dbo.jeweler_payments (jeweler_id, payment_date);
+  CREATE INDEX IX_jp_order ON dbo.jeweler_payments (order_id);
+  CREATE INDEX IX_jp_org_date ON dbo.jeweler_payments (org_id, payment_date);
+END
+GO
+
 
 /* =====================================================================
    2. FUNCIONES DE APOYO
@@ -900,6 +1061,15 @@ BEGIN
 END
 GO
 
+-- Monto con el símbolo de su moneda (PEN → S/, USD → US$)
+CREATE OR ALTER FUNCTION dbo.fn_format_amount(@amount DECIMAL(14, 2), @currency NVARCHAR(3))
+RETURNS NVARCHAR(40)
+AS
+BEGIN
+  RETURN CASE WHEN @currency = N'USD' THEN N'US$ ' ELSE N'S/ ' END + FORMAT(@amount, 'N2', 'en-US');
+END
+GO
+
 CREATE OR ALTER FUNCTION dbo.fn_format_qty(@qty DECIMAL(14, 3), @decimals INT)
 RETURNS NVARCHAR(40)
 AS
@@ -913,7 +1083,8 @@ CREATE OR ALTER FUNCTION dbo.fn_user_name(@user_id UNIQUEIDENTIFIER)
 RETURNS NVARCHAR(150)
 AS
 BEGIN
-  RETURN ISNULL((SELECT full_name FROM dbo.profiles WHERE id = @user_id), N'Sistema');
+  RETURN COALESCE((SELECT full_name FROM dbo.profiles WHERE id = @user_id),
+                  (SELECT full_name FROM dbo.users WHERE id = @user_id), N'Sistema');
 END
 GO
 
@@ -923,6 +1094,17 @@ AS
 BEGIN
   RETURN CASE WHEN EXISTS (SELECT 1 FROM dbo.platform_admins WHERE user_id = @user_id) THEN 1 ELSE 0 END;
 END
+GO
+
+-- Precio vigente de un material: el último registrado con fecha <= hoy
+CREATE OR ALTER FUNCTION dbo.fn_material_day_price(@material_id UNIQUEIDENTIFIER)
+RETURNS TABLE
+AS
+RETURN
+  SELECT TOP (1) p.price, p.price_date, p.created_by
+    FROM dbo.material_prices p
+   WHERE p.material_id = @material_id AND p.price_date <= dbo.fn_today()
+   ORDER BY p.price_date DESC;
 GO
 
 -- ---------------------------------------------------------------------
@@ -1587,7 +1769,7 @@ AS
 BEGIN
   SET NOCOUNT ON;
   SELECT u.id AS user_id, u.email, u.password_hash, u.locked_until,
-         p.full_name, p.role, p.active, p.org_id,
+         COALESCE(p.full_name, u.full_name) AS full_name, p.role, p.active, p.org_id,
          CASE WHEN p.org_id IS NULL THEN NULL ELSE dbo.fn_org_access_state(p.org_id) END AS org_state,
          dbo.fn_is_platform_admin(u.id) AS is_platform_admin
     FROM dbo.users u
@@ -1614,35 +1796,31 @@ BEGIN
 END
 GO
 
--- Instalación vacía: el primer usuario crea la empresa y es superadministrador.
+-- Instalación vacía: el primer usuario es el superadministrador de la plataforma.
+-- No pertenece a ninguna empresa: solo administra accesos, planes y pagos.
 CREATE OR ALTER PROCEDURE api.usp_auth_setup_first_user
   @email          NVARCHAR(254),
   @full_name      NVARCHAR(150),
-  @password_hash  NVARCHAR(500),
-  @company_name   NVARCHAR(150) = N'Mi Orfebrería'
+  @password_hash  NVARCHAR(500)
 AS
 BEGIN
   SET NOCOUNT ON; SET XACT_ABORT ON;
   BEGIN TRY
     BEGIN TRAN;
-    DECLARE @org_id UNIQUEIDENTIFIER, @user_id UNIQUEIDENTIFIER = NEWID(), @now DATETIMEOFFSET(3) = dbo.fn_now(),
-            @mail NVARCHAR(254) = LOWER(LTRIM(RTRIM(@email))), @end DATE = DATEADD(YEAR, 1, dbo.fn_today());
+    DECLARE @user_id UNIQUEIDENTIFIER = NEWID(), @now DATETIMEOFFSET(3) = dbo.fn_now(),
+            @mail NVARCHAR(254) = LOWER(LTRIM(RTRIM(@email)));
 
-    IF EXISTS (SELECT 1 FROM dbo.organizations WITH (UPDLOCK, HOLDLOCK))
+    IF EXISTS (SELECT 1 FROM dbo.platform_admins WITH (UPDLOCK, HOLDLOCK))
       THROW 50000, N'El sistema ya fue configurado. El registro es solo por invitación.', 1;
-
-    EXEC dbo.usp_int_create_org @company_name, NULL, NULL, @mail, N'EMPRESA', N'ACTIVE', @end, @org_id OUTPUT;
+    IF EXISTS (SELECT 1 FROM dbo.users WHERE email = @mail)
+      THROW 50000, N'Ese correo ya tiene una cuenta en el sistema.', 1;
 
     INSERT INTO dbo.users (id, email, password_hash, full_name, password_changed_at, created_at)
     VALUES (@user_id, @mail, @password_hash, @full_name, @now, @now);
-    INSERT INTO dbo.profiles (id, org_id, full_name, email, role, active, created_at, updated_at)
-    VALUES (@user_id, @org_id, @full_name, @mail, N'ADMIN', 1, @now, @now);
-    INSERT INTO dbo.user_branches (org_id, user_id, branch_id)
-    SELECT @org_id, @user_id, id FROM dbo.branches WHERE org_id = @org_id AND is_main = 1;
     INSERT INTO dbo.platform_admins (user_id) VALUES (@user_id);
 
     COMMIT;
-    SELECT @user_id AS user_id, @org_id AS org_id;
+    SELECT @user_id AS user_id;
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK;
@@ -1777,7 +1955,7 @@ BEGIN
     UPDATE dbo.users SET password_hash = @password_hash, password_changed_at = @now, failed_logins = 0, locked_until = NULL
      WHERE id = @user_id;
     COMMIT;
-    SELECT @user_id AS user_id;
+    SELECT @user_id AS user_id, (SELECT email FROM dbo.users WHERE id = @user_id) AS email;
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK;
@@ -1801,6 +1979,8 @@ GO
 /* ---------------------------------------------------------------------
    4.2 Sesión: perfil, plan y sucursales del usuario
    Funciona aun con la empresa suspendida (para mostrar el aviso).
+   El superadministrador no tiene perfil de empresa: org_id y role vienen
+   en NULL y no hay suscripción ni sucursales.
    --------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE api.usp_me_get
   @user_id UNIQUEIDENTIFIER
@@ -1808,10 +1988,13 @@ AS
 BEGIN
   SET NOCOUNT ON;
   -- 1) Perfil
-  SELECT p.id, p.org_id, p.full_name, p.email, p.phone, p.role, p.active, p.default_branch_id,
-         dbo.fn_is_platform_admin(p.id) AS is_platform_admin, s.company_name
-    FROM dbo.profiles p JOIN dbo.settings s ON s.org_id = p.org_id
-   WHERE p.id = @user_id;
+  SELECT u.id, p.org_id, COALESCE(p.full_name, u.full_name) AS full_name, u.email, p.phone, p.role,
+         CAST(CASE WHEN p.id IS NULL THEN dbo.fn_is_platform_admin(u.id) ELSE p.active END AS BIT) AS active,
+         p.default_branch_id, dbo.fn_is_platform_admin(u.id) AS is_platform_admin, s.company_name
+    FROM dbo.users u
+    LEFT JOIN dbo.profiles p ON p.id = u.id
+    LEFT JOIN dbo.settings s ON s.org_id = p.org_id
+   WHERE u.id = @user_id;
 
   -- 2) Suscripción (ex my_subscription)
   SELECT s.org_id, s.plan_code, pl.name AS plan_name, pl.max_users, s.extra_users,
@@ -1877,7 +2060,7 @@ BEGIN
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT p.id, p.full_name, p.email, p.phone, p.role, p.active, p.default_branch_id, p.created_at,
+  SELECT p.id, p.org_id, p.full_name, p.email, p.phone, p.role, p.active, p.default_branch_id, p.created_at, p.updated_at,
          (SELECT STRING_AGG(b.code, N',') WITHIN GROUP (ORDER BY b.code)
             FROM dbo.user_branches ub JOIN dbo.branches b ON b.id = ub.branch_id
            WHERE ub.user_id = p.id) AS branch_codes,
@@ -1893,7 +2076,8 @@ CREATE OR ALTER PROCEDURE api.usp_user_update
   @user_id         UNIQUEIDENTIFIER,
   @target_user_id  UNIQUEIDENTIFIER,
   @role            NVARCHAR(20),
-  @active          BIT
+  @active          BIT,
+  @full_name       NVARCHAR(150) = NULL      -- NULL = no cambia
 AS
 BEGIN
   SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -1919,7 +2103,10 @@ BEGIN
       END
     END
 
-    UPDATE dbo.profiles SET role = @role, active = @active, updated_at = dbo.fn_now() WHERE id = @target_user_id;
+    UPDATE dbo.profiles
+       SET role = @role, active = @active,
+           full_name = ISNULL(NULLIF(LTRIM(RTRIM(@full_name)), N''), full_name), updated_at = dbo.fn_now()
+     WHERE id = @target_user_id;
     COMMIT;
   END TRY
   BEGIN CATCH
@@ -2081,7 +2268,7 @@ BEGIN
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
   SELECT org_id, company_name, tax_id, address, phone, email, currency, tax_rate, quote_validity_days,
-         default_terms, updated_at
+         default_terms, logo, slogan, mobile, city, updated_at
     FROM dbo.settings WHERE org_id = @org_id;
 END
 GO
@@ -2096,7 +2283,11 @@ CREATE OR ALTER PROCEDURE api.usp_settings_update
   @currency             NVARCHAR(3),
   @tax_rate             DECIMAL(5, 2),
   @quote_validity_days  INT,
-  @default_terms        NVARCHAR(2000)
+  @default_terms        NVARCHAR(2000),
+  @logo                 NVARCHAR(MAX) = NULL,
+  @slogan               NVARCHAR(500) = NULL,
+  @mobile               NVARCHAR(80) = NULL,
+  @city                 NVARCHAR(60) = NULL
 AS
 BEGIN
   SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -2105,13 +2296,18 @@ BEGIN
     DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
     EXEC dbo.usp_int_ctx @user_id, N'ADMIN', 1, @org_id OUTPUT, @role OUTPUT;
     IF LEN(LTRIM(ISNULL(@company_name, N''))) = 0 THROW 50000, N'Indique el nombre de la empresa.', 1;
+    IF NULLIF(@logo, N'') IS NOT NULL AND @logo NOT LIKE N'data:image/%'
+      THROW 50000, N'El logo debe ser una imagen PNG o JPG.', 1;
+    IF LEN(@logo) > 700000 THROW 50000, N'El logo es demasiado grande (máximo 500 KB).', 1;
 
     UPDATE dbo.settings
        SET company_name = LTRIM(RTRIM(@company_name)), tax_id = NULLIF(LTRIM(RTRIM(@tax_id)), N''),
            address = NULLIF(LTRIM(RTRIM(@address)), N''), phone = NULLIF(LTRIM(RTRIM(@phone)), N''),
            email = NULLIF(LTRIM(RTRIM(@email)), N''), currency = ISNULL(@currency, currency),
            tax_rate = ISNULL(@tax_rate, tax_rate), quote_validity_days = ISNULL(@quote_validity_days, quote_validity_days),
-           default_terms = @default_terms, updated_at = dbo.fn_now()
+           default_terms = @default_terms, logo = NULLIF(@logo, N''), slogan = NULLIF(LTRIM(RTRIM(@slogan)), N''),
+           mobile = NULLIF(LTRIM(RTRIM(@mobile)), N''), city = NULLIF(LTRIM(RTRIM(@city)), N''),
+           updated_at = dbo.fn_now()
      WHERE org_id = @org_id;
     UPDATE dbo.organizations SET name = LTRIM(RTRIM(@company_name)) WHERE id = @org_id;
     COMMIT;
@@ -2399,7 +2595,7 @@ BEGIN
   SELECT COUNT(CASE WHEN o.status <> N'CANCELADO' THEN 1 END) AS orders_count,
          ISNULL(SUM(CASE WHEN o.status <> N'CANCELADO' THEN o.total END), 0) AS total_purchased,
          ISNULL(SUM(CASE WHEN o.status <> N'CANCELADO' THEN o.balance END), 0) AS balance,
-         MAX(o.created_at) AS last_order_at
+         MAX(o.created_at) AS last_order_at, MAX(o.updated_at) AS last_interaction_at
     FROM dbo.orders o
     JOIN dbo.fn_visible_orders(@user_id, NULL) v ON v.id = o.id
    WHERE o.customer_id = @id;
@@ -2416,6 +2612,28 @@ BEGIN
     JOIN dbo.branches b ON b.id = o.branch_id
    WHERE o.customer_id = @id
    ORDER BY o.created_at DESC;
+END
+GO
+
+-- Historial de auditoría de los pedidos visibles de un cliente
+CREATE OR ALTER PROCEDURE api.usp_customer_history
+  @user_id      UNIQUEIDENTIFIER,
+  @customer_id  UNIQUEIDENTIFIER,
+  @limit        INT = 100
+AS
+BEGIN
+  SET NOCOUNT ON;
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
+  EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
+
+  SELECT TOP (ISNULL(@limit, 100))
+         h.id, h.order_id, h.event_type, h.description, h.old_value, h.new_value, h.actor_name, h.created_at,
+         o.number AS order_number
+    FROM dbo.order_history h
+    JOIN dbo.orders o ON o.id = h.order_id
+    JOIN dbo.fn_visible_orders(@user_id, NULL) v ON v.id = o.id
+   WHERE o.customer_id = @customer_id
+   ORDER BY h.created_at DESC;
 END
 GO
 
@@ -2544,7 +2762,8 @@ GO
 CREATE OR ALTER PROCEDURE api.usp_materials_list
   @user_id           UNIQUEIDENTIFIER,
   @branch_id         UNIQUEIDENTIFIER = NULL,
-  @include_inactive  BIT = 0
+  @include_inactive  BIT = 0,
+  @type              NVARCHAR(30) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -2556,13 +2775,99 @@ BEGIN
   SELECT m.id, m.name, m.type, m.purity, m.unit, m.reference_cost, m.active, m.created_at, m.updated_at,
          m.stock AS total_stock, m.min_stock AS total_min_stock,
          x.stock, x.min_stock,
-         CAST(CASE WHEN m.active = 1 AND x.stock <= x.min_stock THEN 1 ELSE 0 END AS BIT) AS below_min
+         CAST(CASE WHEN m.active = 1 AND x.stock <= x.min_stock THEN 1 ELSE 0 END AS BIT) AS below_min,
+         dp.price AS day_price, dp.price_date AS day_price_date
     FROM dbo.materials m
     LEFT JOIN dbo.material_stock ms ON ms.material_id = m.id AND ms.branch_id = @branch_id
    CROSS APPLY (SELECT CASE WHEN @branch_id IS NULL THEN m.stock ELSE ISNULL(ms.stock, 0) END AS stock,
                        CASE WHEN @branch_id IS NULL THEN m.min_stock ELSE ISNULL(ms.min_stock, 0) END AS min_stock) x
+   OUTER APPLY dbo.fn_material_day_price(m.id) dp
    WHERE m.org_id = @org_id AND (@include_inactive = 1 OR m.active = 1)
+     AND (@type IS NULL OR m.type = @type)
    ORDER BY m.type, m.name;
+END
+GO
+
+/* ---------------------------------------------------------------------
+   Precios del día (S/ por unidad del material). Todos los roles consultan;
+   ADMIN y GERENTE registran.
+   --------------------------------------------------------------------- */
+CREATE OR ALTER PROCEDURE api.usp_material_prices_current
+  @user_id UNIQUEIDENTIFIER
+AS
+BEGIN
+  SET NOCOUNT ON;
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
+  EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
+
+  SELECT m.id AS material_id, m.name, m.type, m.purity, m.unit, m.reference_cost,
+         dp.price, dp.price_date, prev.price AS previous_price, prev.price_date AS previous_date,
+         dbo.fn_user_name(dp.created_by) AS updated_by
+    FROM dbo.materials m
+   OUTER APPLY dbo.fn_material_day_price(m.id) dp
+   OUTER APPLY (SELECT TOP (1) p.price, p.price_date FROM dbo.material_prices p
+                 WHERE p.material_id = m.id AND p.price_date < dp.price_date
+                 ORDER BY p.price_date DESC) prev
+   WHERE m.org_id = @org_id AND m.active = 1
+   ORDER BY CASE m.type WHEN N'ORO' THEN 1 WHEN N'PLATA' THEN 2 WHEN N'PLATINO' THEN 3 ELSE 4 END, m.name;
+END
+GO
+
+-- Registra (o corrige) los precios de una fecha. @prices: [{"material_id": "...", "price": 285.5}, ...]
+CREATE OR ALTER PROCEDURE api.usp_material_prices_save
+  @user_id     UNIQUEIDENTIFIER,
+  @price_date  DATE = NULL,
+  @prices      NVARCHAR(MAX)
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @now DATETIMEOFFSET(3) = dbo.fn_now();
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE', 1, @org_id OUTPUT, @role OUTPUT;
+    SET @price_date = ISNULL(@price_date, dbo.fn_today());
+    IF @price_date > dbo.fn_today() THROW 50000, N'No se pueden registrar precios con fecha futura.', 1;
+    IF ISJSON(@prices) = 0 THROW 50000, N'Lista de precios no válida.', 1;
+
+    DECLARE @rows TABLE (material_id UNIQUEIDENTIFIER PRIMARY KEY, price DECIMAL(12, 2));
+    INSERT INTO @rows (material_id, price)
+    SELECT TRY_CAST(j.material_id AS UNIQUEIDENTIFIER), j.price
+      FROM OPENJSON(@prices) WITH (material_id NVARCHAR(50), price DECIMAL(12, 2)) j
+     WHERE j.price IS NOT NULL;
+
+    IF NOT EXISTS (SELECT 1 FROM @rows) THROW 50000, N'Indique al menos un precio.', 1;
+    IF EXISTS (SELECT 1 FROM @rows WHERE price <= 0) THROW 50000, N'Los precios deben ser mayores que cero.', 1;
+    IF EXISTS (SELECT 1 FROM @rows r WHERE r.material_id IS NULL
+                  OR NOT EXISTS (SELECT 1 FROM dbo.materials m WHERE m.id = r.material_id AND m.org_id = @org_id))
+      THROW 50004, N'Material no encontrado.', 1;
+
+    MERGE dbo.material_prices AS t
+    USING @rows AS s ON t.material_id = s.material_id AND t.price_date = @price_date
+    WHEN MATCHED THEN UPDATE SET price = s.price, created_by = @user_id, updated_at = @now
+    WHEN NOT MATCHED THEN INSERT (org_id, material_id, price_date, price, created_by, created_at, updated_at)
+                          VALUES (@org_id, s.material_id, @price_date, s.price, @user_id, @now, @now);
+    COMMIT;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+CREATE OR ALTER PROCEDURE api.usp_material_price_history
+  @user_id      UNIQUEIDENTIFIER,
+  @material_id  UNIQUEIDENTIFIER,
+  @limit        INT = 60
+AS
+BEGIN
+  SET NOCOUNT ON;
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
+  EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
+  SELECT TOP (ISNULL(@limit, 60)) p.price_date, p.price, dbo.fn_user_name(p.created_by) AS updated_by, p.updated_at
+    FROM dbo.material_prices p
+   WHERE p.material_id = @material_id AND p.org_id = @org_id
+   ORDER BY p.price_date DESC;
 END
 GO
 
@@ -2767,28 +3072,37 @@ GO
 
 -- Kárdex de un material (filtrable por sucursal y fechas)
 CREATE OR ALTER PROCEDURE api.usp_material_kardex
-  @user_id      UNIQUEIDENTIFIER,
-  @material_id  UNIQUEIDENTIFIER,
-  @branch_id    UNIQUEIDENTIFIER = NULL,
-  @from         DATE = NULL,
-  @to           DATE = NULL
+  @user_id        UNIQUEIDENTIFIER,
+  @material_id    UNIQUEIDENTIFIER = NULL,     -- NULL = todos los materiales
+  @branch_id      UNIQUEIDENTIFIER = NULL,
+  @order_id       UNIQUEIDENTIFIER = NULL,
+  @movement_type  NVARCHAR(20) = NULL,
+  @from           DATE = NULL,
+  @to             DATE = NULL,
+  @limit          INT = 500
 AS
 BEGIN
   SET NOCOUNT ON;
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT mm.id, mm.movement_date, mm.movement_type, mm.ownership, mm.quantity, mm.unit_cost, mm.stock_after, mm.notes,
+  SELECT TOP (ISNULL(@limit, 500))
+         mm.id, mm.material_id, m.name AS material_name, m.purity AS material_purity, m.unit AS material_unit,
+         mm.movement_date, mm.movement_type, mm.ownership, mm.quantity, mm.unit_cost, mm.stock_after, mm.notes,
          mm.branch_id, b.code AS branch_code, b.name AS branch_name,
          mm.counterpart_branch_id, cb.name AS counterpart_branch_name, mm.transfer_id,
          mm.order_id, o.number AS order_number, p.full_name AS created_by_name, mm.created_at
     FROM dbo.material_movements mm
+    JOIN dbo.materials m ON m.id = mm.material_id
     JOIN dbo.branches b ON b.id = mm.branch_id
     LEFT JOIN dbo.branches cb ON cb.id = mm.counterpart_branch_id
     LEFT JOIN dbo.orders o ON o.id = mm.order_id
     LEFT JOIN dbo.profiles p ON p.id = mm.created_by
-   WHERE mm.material_id = @material_id AND mm.org_id = @org_id
+   WHERE mm.org_id = @org_id
+     AND (@material_id IS NULL OR mm.material_id = @material_id)
      AND (@branch_id IS NULL OR mm.branch_id = @branch_id)
+     AND (@order_id IS NULL OR mm.order_id = @order_id)
+     AND (@movement_type IS NULL OR mm.movement_type = @movement_type)
      AND (@from IS NULL OR mm.movement_date >= @from)
      AND (@to IS NULL OR mm.movement_date <= @to)
      AND ((@role IN (N'ADMIN', N'GERENTE', N'SUPERVISOR') AND mm.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id)))
@@ -2834,13 +3148,12 @@ BEGIN
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @q NVARCHAR(102) = N'%' + NULLIF(LTRIM(RTRIM(@search)), N'') + N'%';
   EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT q.id, q.number, q.status, q.issue_date, q.expiry_date, q.title, q.total, q.order_id,
-         q.customer_id, c.full_name AS customer_name, q.service_type_id, st.name AS service_name,
-         q.branch_id, b.name AS branch_name, q.created_at, q.updated_at
+  SELECT q.*, c.full_name AS customer_name, st.name AS service_name, b.name AS branch_name, o.number AS order_number
     FROM dbo.quotations q
     JOIN dbo.customers c ON c.id = q.customer_id
     JOIN dbo.service_types st ON st.id = q.service_type_id
     JOIN dbo.branches b ON b.id = q.branch_id
+    LEFT JOIN dbo.orders o ON o.id = q.order_id
    WHERE q.org_id = @org_id
      AND q.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id))
      AND (@status IS NULL OR q.status = @status)
@@ -2868,6 +3181,7 @@ BEGIN
 
   SELECT q.*, c.full_name AS customer_name, c.document_type AS customer_document_type,
          c.document_number AS customer_document_number, c.phone AS customer_phone, c.email AS customer_email,
+         c.address AS customer_address,
          st.name AS service_name, b.name AS branch_name, o.number AS order_number, ap.full_name AS approved_by_name
     FROM dbo.quotations q
     JOIN dbo.customers c ON c.id = q.customer_id
@@ -2877,7 +3191,7 @@ BEGIN
     LEFT JOIN dbo.profiles ap ON ap.id = q.approved_by
    WHERE q.id = @id;
 
-  SELECT id, position, description, detail, material_id, material_name, quantity, unit, unit_price, discount, subtotal
+  SELECT id, position, description, detail, material_id, material_name, quantity, unit, weight, unit_price, discount, subtotal
     FROM dbo.quotation_items WHERE quotation_id = @id ORDER BY position;
 END
 GO
@@ -2897,12 +3211,15 @@ BEGIN
             @branch_id UNIQUEIDENTIFIER, @customer_id UNIQUEIDENTIFIER, @service_type_id UNIQUEIDENTIFIER,
             @issue_date DATE, @expiry_date DATE, @title NVARCHAR(200), @main_material NVARCHAR(100),
             @estimated_weight DECIMAL(10, 2), @stone NVARCHAR(100), @size NVARCHAR(50), @notes NVARCHAR(2000),
-            @terms NVARCHAR(2000), @tax_rate DECIMAL(5, 2), @validity INT, @default_tax DECIMAL(5, 2);
+            @terms NVARCHAR(2000), @tax_rate DECIMAL(5, 2), @validity INT, @default_tax DECIMAL(5, 2),
+            @currency NVARCHAR(3);
     EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 1, @org_id OUTPUT, @role OUTPUT;
 
     IF ISJSON(@header) = 0 THROW 50000, N'Cabecera no válida.', 1;
     IF ISJSON(@items) = 0 OR NOT EXISTS (SELECT 1 FROM OPENJSON(@items))
       THROW 50000, N'La cotización debe tener al menos un ítem.', 1;
+    SET @currency = ISNULL(NULLIF(JSON_VALUE(@header, N'$.currency'), N''), N'PEN');
+    IF @currency NOT IN (N'PEN', N'USD') THROW 50000, N'Moneda no válida.', 1;
 
     SELECT @branch_id = TRY_CAST(NULLIF(h.branch_id, N'') AS UNIQUEIDENTIFIER),
            @customer_id = TRY_CAST(NULLIF(h.customer_id, N'') AS UNIQUEIDENTIFIER),
@@ -2936,11 +3253,11 @@ BEGIN
       SET @issue_date = ISNULL(@issue_date, @today);
       SET @id = NEWID();
       INSERT INTO dbo.quotations (id, org_id, branch_id, number, customer_id, service_type_id, issue_date, expiry_date, title,
-                                  main_material, estimated_weight, stone, size, notes, terms, tax_rate, created_by,
+                                  main_material, estimated_weight, stone, size, notes, terms, tax_rate, currency, created_by,
                                   created_at, updated_at)
       VALUES (@id, @org_id, @branch_id, @number, @customer_id, @service_type_id, @issue_date,
               ISNULL(@expiry_date, DATEADD(DAY, ISNULL(@validity, 15), @issue_date)), @title, @main_material,
-              @estimated_weight, @stone, @size, @notes, @terms, COALESCE(@tax_rate, @default_tax, 18), @user_id, @now, @now);
+              @estimated_weight, @stone, @size, @notes, @terms, COALESCE(@tax_rate, @default_tax, 18), @currency, @user_id, @now, @now);
     END
     ELSE
     BEGIN
@@ -2956,20 +3273,21 @@ BEGIN
          SET branch_id = @branch_id, customer_id = @customer_id, service_type_id = @service_type_id,
              issue_date = ISNULL(@issue_date, issue_date), expiry_date = ISNULL(@expiry_date, expiry_date),
              title = @title, main_material = @main_material, estimated_weight = @estimated_weight, stone = @stone,
-             size = @size, notes = @notes, terms = @terms, tax_rate = ISNULL(@tax_rate, tax_rate), updated_at = @now
+             size = @size, notes = @notes, terms = @terms, tax_rate = ISNULL(@tax_rate, tax_rate), currency = @currency,
+             updated_at = @now
        WHERE id = @id;
       DELETE FROM dbo.quotation_items WHERE quotation_id = @id;
     END
 
     INSERT INTO dbo.quotation_items (org_id, quotation_id, position, description, detail, material_id, material_name,
-                                     quantity, unit, unit_price, discount)
+                                     quantity, unit, weight, unit_price, discount)
     SELECT @org_id, @id, CAST(a.[key] AS INT), LTRIM(RTRIM(j.description)), NULLIF(j.detail, N''),
            TRY_CAST(NULLIF(j.material_id, N'') AS UNIQUEIDENTIFIER), NULLIF(j.material_name, N''),
-           j.quantity, ISNULL(NULLIF(j.unit, N''), N'und'), j.unit_price, ISNULL(j.discount, 0)
+           j.quantity, ISNULL(NULLIF(j.unit, N''), N'und'), NULLIF(j.weight, 0), j.unit_price, ISNULL(j.discount, 0)
       FROM OPENJSON(@items) a
      CROSS APPLY OPENJSON(a.value) WITH (
         description NVARCHAR(500), detail NVARCHAR(1000), material_id NVARCHAR(50), material_name NVARCHAR(150),
-        quantity DECIMAL(12, 3), unit NVARCHAR(10), unit_price DECIMAL(12, 2), discount DECIMAL(12, 2)) j;
+        quantity DECIMAL(12, 3), unit NVARCHAR(10), weight DECIMAL(10, 2), unit_price DECIMAL(12, 2), discount DECIMAL(12, 2)) j;
 
     EXEC dbo.usp_int_recalc_quotation_totals @id;
     COMMIT;
@@ -3048,14 +3366,15 @@ BEGIN
     EXEC dbo.usp_int_next_document_number @org_id, N'COT', @number OUTPUT;
 
     INSERT INTO dbo.quotations (id, org_id, branch_id, number, customer_id, service_type_id, issue_date, expiry_date, title,
-                                main_material, estimated_weight, stone, size, notes, terms, tax_rate, created_by, created_at, updated_at)
+                                main_material, estimated_weight, stone, size, notes, terms, tax_rate, currency, created_by,
+                                created_at, updated_at)
     SELECT @new, org_id, branch_id, @number, customer_id, service_type_id, @today, DATEADD(DAY, ISNULL(@days, 15), @today), title,
-           main_material, estimated_weight, stone, size, notes, terms, tax_rate, @user_id, @now, @now
+           main_material, estimated_weight, stone, size, notes, terms, tax_rate, currency, @user_id, @now, @now
       FROM dbo.quotations WHERE id = @id;
 
     INSERT INTO dbo.quotation_items (org_id, quotation_id, position, description, detail, material_id, material_name,
-                                     quantity, unit, unit_price, discount)
-    SELECT org_id, @new, position, description, detail, material_id, material_name, quantity, unit, unit_price, discount
+                                     quantity, unit, weight, unit_price, discount)
+    SELECT org_id, @new, position, description, detail, material_id, material_name, quantity, unit, weight, unit_price, discount
       FROM dbo.quotation_items WHERE quotation_id = @id;
 
     EXEC dbo.usp_int_recalc_quotation_totals @new;
@@ -3121,19 +3440,19 @@ BEGIN
     EXEC dbo.usp_int_next_document_number @org_id, N'PED', @number OUTPUT;
     INSERT INTO dbo.orders (id, org_id, branch_id, number, customer_id, quotation_id, service_type_id, status, priority, title,
                             description, main_material, estimated_weight, stone, size, notes, assigned_to, start_date,
-                            due_date, tax_rate, created_by, created_at, updated_at)
+                            due_date, tax_rate, currency, created_by, created_at, updated_at)
     SELECT @order_id, q.org_id, q.branch_id, @number, q.customer_id, q.id, q.service_type_id, N'APROBADO',
            ISNULL(@priority, N'MEDIA'), q.title,
            (SELECT STRING_AGG(CAST(i.description + ISNULL(N': ' + i.detail, N'') AS NVARCHAR(MAX)), NCHAR(10))
                    WITHIN GROUP (ORDER BY i.position)
               FROM dbo.quotation_items i WHERE i.quotation_id = q.id),
            q.main_material, q.estimated_weight, q.stone, q.size, q.notes, @assigned_to, @today, @due_date, q.tax_rate,
-           @user_id, @now, @now
+           q.currency, @user_id, @now, @now
       FROM dbo.quotations q WHERE q.id = @quotation_id;
 
     INSERT INTO dbo.order_items (org_id, order_id, position, description, detail, material_id, material_name,
-                                 quantity, unit, unit_price, discount)
-    SELECT org_id, @order_id, position, description, detail, material_id, material_name, quantity, unit, unit_price, discount
+                                 quantity, unit, weight, unit_price, discount)
+    SELECT org_id, @order_id, position, description, detail, material_id, material_name, quantity, unit, weight, unit_price, discount
       FROM dbo.quotation_items WHERE quotation_id = @quotation_id;
 
     EXEC dbo.usp_int_recalc_order_totals @order_id;
@@ -3157,40 +3476,46 @@ GO
 /* ---------------------------------------------------------------------
    4.9 Pedidos
    header: {"branch_id","customer_id","service_type_id","priority","title","description","main_material",
-            "estimated_weight","stone","size","notes","assigned_to","start_date","due_date","tax_rate"}
+            "estimated_weight","stone","size","notes","assigned_to","start_date","due_date","tax_rate","currency"}
+   items: [{"description","detail","material_id","material_name","quantity","unit","weight","unit_price","discount"}]
    --------------------------------------------------------------------- */
 CREATE OR ALTER PROCEDURE api.usp_orders_list
-  @user_id      UNIQUEIDENTIFIER,
-  @status       NVARCHAR(20) = NULL,
-  @branch_id    UNIQUEIDENTIFIER = NULL,
-  @customer_id  UNIQUEIDENTIFIER = NULL,
-  @assigned_to  UNIQUEIDENTIFIER = NULL,
-  @search       NVARCHAR(100) = NULL,
-  @only_active  BIT = 0,
-  @from         DATE = NULL,
-  @to           DATE = NULL
+  @user_id           UNIQUEIDENTIFIER,
+  @statuses          NVARCHAR(400) = NULL,     -- 'APROBADO,PRODUCCION' (NULL = todos)
+  @exclude_statuses  NVARCHAR(400) = NULL,
+  @branch_id         UNIQUEIDENTIFIER = NULL,
+  @customer_id       UNIQUEIDENTIFIER = NULL,
+  @assigned_to       UNIQUEIDENTIFIER = NULL,
+  @service_type_id   UNIQUEIDENTIFIER = NULL,
+  @search            NVARCHAR(100) = NULL,
+  @only_active       BIT = 0,
+  @overdue_only      BIT = 0,                  -- entrega vencida y sin entregar/cerrar/cancelar/pausar
+  @from              DATE = NULL,
+  @to                DATE = NULL,
+  @limit             INT = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
-  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @q NVARCHAR(102) = N'%' + NULLIF(LTRIM(RTRIM(@search)), N'') + N'%';
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @q NVARCHAR(102) = N'%' + NULLIF(LTRIM(RTRIM(@search)), N'') + N'%',
+          @today DATE = dbo.fn_today();
   EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT o.id, o.number, o.status, o.priority, o.title, o.start_date, o.due_date, o.total, o.amount_paid, o.balance,
-         o.payment_status, o.progress, o.current_stage_name, o.qc_approved, o.delivered_at, o.closed_at,
-         o.customer_id, c.full_name AS customer_name, o.service_type_id, st.name AS service_name,
-         o.assigned_to, a.full_name AS assignee_name, o.branch_id, b.name AS branch_name,
-         o.quotation_id, o.created_at, o.updated_at
+  SELECT TOP (ISNULL(@limit, 2147483647))
+         o.*, c.full_name AS customer_name, st.name AS service_name, a.full_name AS assignee_name, b.name AS branch_name
     FROM dbo.orders o
     JOIN dbo.fn_visible_orders(@user_id, NULL) v ON v.id = o.id
     JOIN dbo.customers c ON c.id = o.customer_id
     JOIN dbo.service_types st ON st.id = o.service_type_id
     JOIN dbo.branches b ON b.id = o.branch_id
     LEFT JOIN dbo.profiles a ON a.id = o.assigned_to
-   WHERE (@status IS NULL OR o.status = @status)
+   WHERE (@statuses IS NULL OR o.status IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@statuses, N',')))
+     AND (@exclude_statuses IS NULL OR o.status NOT IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@exclude_statuses, N',')))
      AND (@branch_id IS NULL OR o.branch_id = @branch_id)
      AND (@customer_id IS NULL OR o.customer_id = @customer_id)
      AND (@assigned_to IS NULL OR o.assigned_to = @assigned_to)
+     AND (@service_type_id IS NULL OR o.service_type_id = @service_type_id)
      AND (@only_active = 0 OR o.status NOT IN (N'ENTREGADO', N'CERRADO', N'CANCELADO'))
+     AND (@overdue_only = 0 OR (o.due_date < @today AND o.status NOT IN (N'ENTREGADO', N'CERRADO', N'CANCELADO', N'PAUSADO')))
      AND (@from IS NULL OR dbo.fn_local_date(o.created_at) >= @from)
      AND (@to IS NULL OR dbo.fn_local_date(o.created_at) <= @to)
      AND (@q IS NULL OR o.number LIKE @q OR o.title LIKE @q OR c.full_name LIKE @q)
@@ -3199,6 +3524,7 @@ END
 GO
 
 -- 1) cabecera 2) ítems 3) etapas 4) historial 5) pagos 6) entregas 7) adjuntos 8) material del cliente
+-- 9) pagos a joyeros (ADMIN y GERENTE)
 CREATE OR ALTER PROCEDURE api.usp_order_get
   @user_id  UNIQUEIDENTIFIER,
   @id       UNIQUEIDENTIFIER
@@ -3210,8 +3536,10 @@ BEGIN
   EXEC dbo.usp_int_assert_order_visible @user_id, @id;
 
   SELECT o.*, c.full_name AS customer_name, c.phone AS customer_phone, c.whatsapp AS customer_whatsapp,
-         c.email AS customer_email, st.name AS service_name, b.name AS branch_name, a.full_name AS assignee_name,
-         q.number AS quotation_number, qc.full_name AS qc_approved_by_name
+         c.email AS customer_email, c.document_type AS customer_document_type,
+         c.document_number AS customer_document_number, c.address AS customer_address, st.name AS service_name, b.name AS branch_name, a.full_name AS assignee_name,
+         q.number AS quotation_number, qc.full_name AS qc_approved_by_name,
+         j.full_name AS jeweler_name, j.document_number AS jeweler_document, j.phone AS jeweler_phone
     FROM dbo.orders o
     JOIN dbo.customers c ON c.id = o.customer_id
     JOIN dbo.service_types st ON st.id = o.service_type_id
@@ -3219,9 +3547,10 @@ BEGIN
     LEFT JOIN dbo.profiles a ON a.id = o.assigned_to
     LEFT JOIN dbo.quotations q ON q.id = o.quotation_id
     LEFT JOIN dbo.profiles qc ON qc.id = o.qc_approved_by
+    LEFT JOIN dbo.jewelers j ON j.id = o.jeweler_id
    WHERE o.id = @id;
 
-  SELECT id, position, description, detail, material_id, material_name, quantity, unit, unit_price, discount, subtotal
+  SELECT id, position, description, detail, material_id, material_name, quantity, unit, weight, unit_price, discount, subtotal
     FROM dbo.order_items WHERE order_id = @id ORDER BY position;
 
   SELECT s.id, s.stage_id, s.name, s.position, s.is_quality_check, s.status, s.is_current, s.assigned_to,
@@ -3232,8 +3561,9 @@ BEGIN
   SELECT id, event_type, description, old_value, new_value, actor_id, actor_name, created_at
     FROM dbo.order_history WHERE order_id = @id ORDER BY created_at DESC;
 
-  SELECT p.id, p.payment_date, p.amount, p.method, p.reference, p.notes, p.is_advance, p.voided, p.voided_at,
-         p.void_reason, p.branch_id, b.name AS branch_name, cb.full_name AS created_by_name, p.created_at
+  SELECT p.id, p.payment_date, p.amount, p.currency, p.method, p.reference, p.notes, p.is_advance, p.voided, p.voided_at,
+         p.void_reason, p.receipt_number, p.received_from, p.branch_id, b.name AS branch_name,
+         cb.full_name AS created_by_name, p.created_at
     FROM dbo.payments p
     JOIN dbo.branches b ON b.id = p.branch_id
     LEFT JOIN dbo.profiles cb ON cb.id = p.created_by
@@ -3257,6 +3587,16 @@ BEGIN
 
   SELECT material_id, material_name, purity, unit, received, used, returned, balance
     FROM dbo.order_client_materials WHERE order_id = @id ORDER BY material_name;
+
+  SELECT jp.id, jp.number, jp.jeweler_id, j.full_name AS jeweler_name, j.document_number AS jeweler_document,
+         jp.order_id, jp.payment_date, jp.amount, jp.currency, jp.method, jp.reference, jp.concept, jp.voided,
+         jp.voided_at, jp.void_reason, jp.branch_id, b.name AS branch_name, cb.full_name AS created_by_name, jp.created_at
+    FROM dbo.jeweler_payments jp
+    JOIN dbo.jewelers j ON j.id = jp.jeweler_id
+    JOIN dbo.branches b ON b.id = jp.branch_id
+    LEFT JOIN dbo.profiles cb ON cb.id = jp.created_by
+   WHERE jp.order_id = @id AND @role IN (N'ADMIN', N'GERENTE')
+   ORDER BY jp.payment_date, jp.created_at;
 END
 GO
 
@@ -3275,7 +3615,7 @@ BEGIN
             @branch_id UNIQUEIDENTIFIER, @customer_id UNIQUEIDENTIFIER, @service_type_id UNIQUEIDENTIFIER,
             @priority NVARCHAR(10), @title NVARCHAR(200), @description NVARCHAR(MAX), @main_material NVARCHAR(100),
             @estimated_weight DECIMAL(10, 2), @stone NVARCHAR(100), @size NVARCHAR(50), @notes NVARCHAR(2000),
-            @assigned_to UNIQUEIDENTIFIER, @start_date DATE, @due_date DATE, @tax_rate DECIMAL(5, 2);
+            @assigned_to UNIQUEIDENTIFIER, @start_date DATE, @due_date DATE, @tax_rate DECIMAL(5, 2), @currency NVARCHAR(3);
     DECLARE @old TABLE (branch_id UNIQUEIDENTIFIER, customer_id UNIQUEIDENTIFIER, service_type_id UNIQUEIDENTIFIER,
                         priority NVARCHAR(10), title NVARCHAR(200), description NVARCHAR(MAX), main_material NVARCHAR(100),
                         estimated_weight DECIMAL(10, 2), stone NVARCHAR(100), size NVARCHAR(50), notes NVARCHAR(2000),
@@ -3286,6 +3626,8 @@ BEGIN
     IF ISJSON(@header) = 0 THROW 50000, N'Cabecera no válida.', 1;
     IF ISJSON(@items) = 0 OR NOT EXISTS (SELECT 1 FROM OPENJSON(@items))
       THROW 50000, N'El pedido debe tener al menos un ítem.', 1;
+    SET @currency = ISNULL(NULLIF(JSON_VALUE(@header, N'$.currency'), N''), N'PEN');
+    IF @currency NOT IN (N'PEN', N'USD') THROW 50000, N'Moneda no válida.', 1;
 
     SELECT @branch_id = TRY_CAST(NULLIF(h.branch_id, N'') AS UNIQUEIDENTIFIER),
            @customer_id = TRY_CAST(NULLIF(h.customer_id, N'') AS UNIQUEIDENTIFIER),
@@ -3323,10 +3665,10 @@ BEGIN
       SET @id = NEWID();
       INSERT INTO dbo.orders (id, org_id, branch_id, number, customer_id, service_type_id, priority, title, description,
                               main_material, estimated_weight, stone, size, notes, assigned_to, start_date, due_date,
-                              tax_rate, created_by, created_at, updated_at)
+                              tax_rate, currency, created_by, created_at, updated_at)
       VALUES (@id, @org_id, @branch_id, @number, @customer_id, @service_type_id, ISNULL(@priority, N'MEDIA'), @title,
               @description, @main_material, @estimated_weight, @stone, @size, @notes, @assigned_to,
-              ISNULL(@start_date, @today), @due_date, COALESCE(@tax_rate, @default_tax, 18), @user_id, @now, @now);
+              ISNULL(@start_date, @today), @due_date, COALESCE(@tax_rate, @default_tax, 18), @currency, @user_id, @now, @now);
 
       SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' creó el pedido ', @number, N'.');
       EXEC dbo.usp_int_log_order_event @id, @user_id, N'CREACION', @msg;
@@ -3344,25 +3686,31 @@ BEGIN
       IF @branch_id IS NULL SELECT @branch_id = branch_id FROM @old;
       ELSE IF @branch_id <> (SELECT branch_id FROM @old) EXEC dbo.usp_int_resolve_branch @user_id, @org_id, @branch_id OUTPUT;
 
+      -- Los pagos y recibos ya emitidos están en la moneda del pedido
+      IF EXISTS (SELECT 1 FROM dbo.orders WHERE id = @id AND currency <> @currency)
+         AND (EXISTS (SELECT 1 FROM dbo.payments WHERE order_id = @id AND voided = 0)
+              OR EXISTS (SELECT 1 FROM dbo.jeweler_payments WHERE order_id = @id AND voided = 0))
+        THROW 50000, N'No se puede cambiar la moneda: el pedido ya tiene pagos registrados. Anúlelos primero.', 1;
+
       UPDATE dbo.orders
          SET branch_id = @branch_id, customer_id = @customer_id, service_type_id = @service_type_id,
              priority = ISNULL(@priority, priority), title = @title, description = @description,
              main_material = @main_material, estimated_weight = @estimated_weight, stone = @stone, size = @size,
              notes = @notes, assigned_to = @assigned_to, start_date = ISNULL(@start_date, start_date),
-             due_date = @due_date, tax_rate = ISNULL(@tax_rate, tax_rate), updated_at = @now
+             due_date = @due_date, tax_rate = ISNULL(@tax_rate, tax_rate), currency = @currency, updated_at = @now
        WHERE id = @id;
       DELETE FROM dbo.order_items WHERE order_id = @id;
     END
 
     INSERT INTO dbo.order_items (org_id, order_id, position, description, detail, material_id, material_name,
-                                 quantity, unit, unit_price, discount)
+                                 quantity, unit, weight, unit_price, discount)
     SELECT @org_id, @id, CAST(a.[key] AS INT), LTRIM(RTRIM(j.description)), NULLIF(j.detail, N''),
            TRY_CAST(NULLIF(j.material_id, N'') AS UNIQUEIDENTIFIER), NULLIF(j.material_name, N''),
-           j.quantity, ISNULL(NULLIF(j.unit, N''), N'und'), j.unit_price, ISNULL(j.discount, 0)
+           j.quantity, ISNULL(NULLIF(j.unit, N''), N'und'), NULLIF(j.weight, 0), j.unit_price, ISNULL(j.discount, 0)
       FROM OPENJSON(@items) a
      CROSS APPLY OPENJSON(a.value) WITH (
         description NVARCHAR(500), detail NVARCHAR(1000), material_id NVARCHAR(50), material_name NVARCHAR(150),
-        quantity DECIMAL(12, 3), unit NVARCHAR(10), unit_price DECIMAL(12, 2), discount DECIMAL(12, 2)) j;
+        quantity DECIMAL(12, 3), unit NVARCHAR(10), weight DECIMAL(10, 2), unit_price DECIMAL(12, 2), discount DECIMAL(12, 2)) j;
 
     EXEC dbo.usp_int_recalc_order_totals @id;
 
@@ -3402,7 +3750,7 @@ BEGIN
 
       IF @n_total <> @o_total AND @o_total <> 0
         INSERT INTO @changes (label)
-        VALUES (CONCAT(N'total (', dbo.fn_format_money(@o_total), N' → ', dbo.fn_format_money(@n_total), N')'));
+        VALUES (CONCAT(N'total (', dbo.fn_format_amount(@o_total, @currency), N' → ', dbo.fn_format_amount(@n_total, @currency), N')'));
 
       IF EXISTS (SELECT 1 FROM @changes)
       BEGIN
@@ -3574,26 +3922,31 @@ BEGIN
 END
 GO
 
--- Actualiza estado, responsable y notas de una etapa.
---   ADMIN, GERENTE, SUPERVISOR: etapas de pedidos visibles
---   ORFEBRE: etapas asignadas a él o de pedidos asignados a él
+-- Actualización parcial de una etapa: los parámetros en NULL no cambian.
+-- @set_assigned / @set_notes = 1 permiten dejar responsable o notas en blanco.
+--   ADMIN, GERENTE, SUPERVISOR: etapas de pedidos visibles; también nombre y posición
+--   ORFEBRE: estado, responsable y notas de etapas asignadas a él o de pedidos asignados a él
 CREATE OR ALTER PROCEDURE api.usp_order_stage_update
-  @user_id      UNIQUEIDENTIFIER,
-  @stage_id     UNIQUEIDENTIFIER,
-  @status       NVARCHAR(20),
-  @assigned_to  UNIQUEIDENTIFIER = NULL,
-  @notes        NVARCHAR(1000) = NULL
+  @user_id       UNIQUEIDENTIFIER,
+  @stage_id      UNIQUEIDENTIFIER,
+  @status        NVARCHAR(20) = NULL,
+  @assigned_to   UNIQUEIDENTIFIER = NULL,
+  @set_assigned  BIT = 0,
+  @notes         NVARCHAR(1000) = NULL,
+  @set_notes     BIT = 0,
+  @name          NVARCHAR(100) = NULL,
+  @position      INT = NULL
 AS
 BEGIN
   SET NOCOUNT ON; SET XACT_ABORT ON;
   BEGIN TRY
     BEGIN TRAN;
     DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @order_id UNIQUEIDENTIFIER, @old_status NVARCHAR(20),
-            @old_assigned UNIQUEIDENTIFIER, @name NVARCHAR(100), @number NVARCHAR(30), @assignee NVARCHAR(150),
+            @old_assigned UNIQUEIDENTIFIER, @old_name NVARCHAR(100), @number NVARCHAR(30), @assignee NVARCHAR(150),
             @msg NVARCHAR(2048), @now DATETIMEOFFSET(3) = dbo.fn_now();
     EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,SUPERVISOR,ORFEBRE', 1, @org_id OUTPUT, @role OUTPUT;
 
-    SELECT @order_id = s.order_id, @old_status = s.status, @old_assigned = s.assigned_to, @name = s.name
+    SELECT @order_id = s.order_id, @old_status = s.status, @old_assigned = s.assigned_to, @old_name = s.name
       FROM dbo.order_production_stages s WITH (UPDLOCK) WHERE s.id = @stage_id AND s.org_id = @org_id;
     IF @order_id IS NULL THROW 50004, N'Etapa no encontrada.', 1;
 
@@ -3601,18 +3954,25 @@ BEGIN
     BEGIN
       IF NOT (@old_assigned = @user_id OR EXISTS (SELECT 1 FROM dbo.orders WHERE id = @order_id AND assigned_to = @user_id))
         THROW 50003, N'Solo puede actualizar las etapas asignadas a usted.', 1;
+      IF @name IS NOT NULL OR @position IS NOT NULL
+        THROW 50003, N'Solo un administrador, gerente o supervisor puede renombrar o reordenar etapas.', 1;
     END
     ELSE
       EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
 
     EXEC dbo.usp_int_assert_order_editable @order_id, @user_id;
+    SET @status = ISNULL(@status, @old_status);
+    IF @set_assigned = 0 SET @assigned_to = @old_assigned;
     IF @assigned_to IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.profiles WHERE id = @assigned_to AND org_id = @org_id)
       THROW 50000, N'El responsable indicado no pertenece a la empresa.', 1;
+    IF @name IS NOT NULL AND LEN(LTRIM(@name)) = 0 THROW 50000, N'Indique el nombre de la etapa.', 1;
 
     UPDATE dbo.order_production_stages
        SET status = @status,
            assigned_to = @assigned_to,
-           notes = NULLIF(LTRIM(RTRIM(@notes)), N''),
+           notes = CASE WHEN @set_notes = 1 OR @notes IS NOT NULL THEN NULLIF(LTRIM(RTRIM(@notes)), N'') ELSE notes END,
+           name = ISNULL(LTRIM(RTRIM(@name)), name),
+           position = ISNULL(@position, position),
            started_at = CASE WHEN @status = @old_status THEN started_at
                              WHEN @status IN (N'EN_PROCESO', N'COMPLETADO') THEN ISNULL(started_at, @now)
                              WHEN @status = N'PENDIENTE' THEN NULL ELSE started_at END,
@@ -3624,14 +3984,19 @@ BEGIN
     SELECT @number = number FROM dbo.orders WHERE id = @order_id;
     IF @status <> @old_status
     BEGIN
-      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' marcó la etapa "', @name, N'" de ', @number, N' como ',
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' marcó la etapa "', @old_name, N'" de ', @number, N' como ',
                         dbo.fn_stage_status_label(@status), N'.');
       EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg, @old_status, @status;
     END
     IF EXISTS (SELECT @old_assigned EXCEPT SELECT @assigned_to)
     BEGIN
       SELECT @assignee = full_name FROM dbo.profiles WHERE id = @assigned_to;
-      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' asignó la etapa "', @name, N'" a ', ISNULL(@assignee, N'(nadie)'), N'.');
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' asignó la etapa "', @old_name, N'" a ', ISNULL(@assignee, N'(nadie)'), N'.');
+      EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg;
+    END
+    IF @name IS NOT NULL AND LTRIM(RTRIM(@name)) <> @old_name
+    BEGIN
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' renombró la etapa "', @old_name, N'" a "', LTRIM(RTRIM(@name)), N'".');
       EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg;
     END
 
@@ -3716,7 +4081,8 @@ CREATE OR ALTER PROCEDURE api.usp_payment_register
   @notes                  NVARCHAR(1000) = NULL,
   @is_advance             BIT = 0,
   @overpayment_confirmed  BIT = 0,
-  @branch_id              UNIQUEIDENTIFIER = NULL
+  @branch_id              UNIQUEIDENTIFIER = NULL,
+  @received_from          NVARCHAR(150) = NULL      -- quien entrega el dinero, si no es el cliente
 AS
 BEGIN
   SET NOCOUNT ON; SET XACT_ABORT ON;
@@ -3724,12 +4090,12 @@ BEGIN
     BEGIN TRAN;
     DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @balance DECIMAL(12, 2), @number NVARCHAR(30),
             @order_branch UNIQUEIDENTIFIER, @id UNIQUEIDENTIFIER = NEWID(), @msg NVARCHAR(2048),
-            @now DATETIMEOFFSET(3) = dbo.fn_now();
+            @now DATETIMEOFFSET(3) = dbo.fn_now(), @currency NVARCHAR(3), @receipt NVARCHAR(30);
     EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 1, @org_id OUTPUT, @role OUTPUT;
     EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
     EXEC dbo.usp_int_assert_order_editable @order_id, @user_id;
 
-    SELECT @balance = balance, @number = number, @order_branch = branch_id
+    SELECT @balance = balance, @number = number, @order_branch = branch_id, @currency = currency
       FROM dbo.orders WITH (UPDLOCK, ROWLOCK) WHERE id = @order_id;
     IF @branch_id IS NULL OR @branch_id = @order_branch SET @branch_id = @order_branch;
     ELSE EXEC dbo.usp_int_resolve_branch @user_id, @org_id, @branch_id OUTPUT;
@@ -3737,16 +4103,19 @@ BEGIN
     IF ISNULL(@amount, 0) <= 0 THROW 50000, N'El monto debe ser mayor que cero.', 1;
     IF @amount > @balance AND ISNULL(@overpayment_confirmed, 0) = 0
     BEGIN
-      SET @msg = CONCAT(N'El monto (', dbo.fn_format_money(@amount), N') supera el saldo pendiente (',
-                        dbo.fn_format_money(@balance), N'). Confirme explícitamente el pago.');
+      SET @msg = CONCAT(N'El monto (', dbo.fn_format_amount(@amount, @currency), N') supera el saldo pendiente (',
+                        dbo.fn_format_amount(@balance, @currency), N'). Confirme explícitamente el pago.');
       THROW 50000, @msg, 1;
     END
 
-    INSERT INTO dbo.payments (id, org_id, branch_id, order_id, payment_date, amount, method, reference, notes, is_advance,
-                              overpayment_confirmed, created_by, created_at)
-    VALUES (@id, @org_id, @branch_id, @order_id, ISNULL(@payment_date, dbo.fn_today()), @amount, @method,
+    -- Cada cobro emite su recibo de ingreso
+    EXEC dbo.usp_int_next_document_number @org_id, N'RI', @receipt OUTPUT;
+
+    INSERT INTO dbo.payments (id, org_id, branch_id, order_id, payment_date, amount, currency, method, reference, notes, is_advance,
+                              overpayment_confirmed, receipt_number, received_from, created_by, created_at)
+    VALUES (@id, @org_id, @branch_id, @order_id, ISNULL(@payment_date, dbo.fn_today()), @amount, @currency, @method,
             NULLIF(LTRIM(RTRIM(@reference)), N''), NULLIF(LTRIM(RTRIM(@notes)), N''), ISNULL(@is_advance, 0),
-            ISNULL(@overpayment_confirmed, 0), @user_id, @now);
+            ISNULL(@overpayment_confirmed, 0), @receipt, NULLIF(LTRIM(RTRIM(@received_from)), N''), @user_id, @now);
 
     UPDATE dbo.orders
        SET amount_paid = (SELECT ISNULL(SUM(amount), 0) FROM dbo.payments WHERE order_id = @order_id AND voided = 0),
@@ -3754,12 +4123,12 @@ BEGIN
      WHERE id = @order_id;
 
     SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' registró ', CASE WHEN @is_advance = 1 THEN N'un adelanto' ELSE N'un pago' END,
-                      N' de ', dbo.fn_format_money(@amount), N' (', UPPER(LEFT(@method, 1)), LOWER(SUBSTRING(@method, 2, 50)),
-                      N') en ', @number, N'.');
+                      N' de ', dbo.fn_format_amount(@amount, @currency), N' (', UPPER(LEFT(@method, 1)), LOWER(SUBSTRING(@method, 2, 50)),
+                      N') en ', @number, N'. Recibo ', @receipt, N'.');
     DECLARE @amount_txt NVARCHAR(50) = CAST(@amount AS NVARCHAR(50));
     EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PAGO', @msg, NULL, @amount_txt;
     COMMIT;
-    SELECT @id AS id;
+    SELECT @id AS id, @receipt AS receipt_number;
   END TRY
   BEGIN CATCH
     IF @@TRANCOUNT > 0 ROLLBACK;
@@ -3795,9 +4164,11 @@ BEGIN
            updated_at = @now
      WHERE id = @order_id;
 
-    SELECT @number = number FROM dbo.orders WHERE id = @order_id;
-    SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' anuló un pago de ', dbo.fn_format_money(@amount), N' en ', @number,
-                      N'. Motivo: ', LTRIM(RTRIM(@reason)), N'.');
+    DECLARE @currency NVARCHAR(3), @receipt NVARCHAR(30);
+    SELECT @number = number, @currency = currency FROM dbo.orders WHERE id = @order_id;
+    SELECT @receipt = receipt_number FROM dbo.payments WHERE id = @payment_id;
+    SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' anuló un pago de ', dbo.fn_format_amount(@amount, @currency), N' en ', @number,
+                      ISNULL(N' (recibo ' + @receipt + N')', N''), N'. Motivo: ', LTRIM(RTRIM(@reason)), N'.');
     DECLARE @amount_txt NVARCHAR(50) = CAST(@amount AS NVARCHAR(50));
     EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PAGO', @msg, @amount_txt, NULL;
     COMMIT;
@@ -3813,7 +4184,9 @@ GO
 CREATE OR ALTER PROCEDURE api.usp_payments_list
   @user_id         UNIQUEIDENTIFIER,
   @order_id        UNIQUEIDENTIFIER = NULL,
+  @customer_id     UNIQUEIDENTIFIER = NULL,
   @branch_id       UNIQUEIDENTIFIER = NULL,
+  @method          NVARCHAR(20) = NULL,
   @from            DATE = NULL,
   @to              DATE = NULL,
   @include_voided  BIT = 1
@@ -3823,9 +4196,11 @@ BEGIN
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT p.id, p.payment_date, p.amount, p.method, p.reference, p.notes, p.is_advance, p.overpayment_confirmed,
-         p.voided, p.voided_at, p.void_reason, vb.full_name AS voided_by_name,
-         p.order_id, o.number AS order_number, o.title AS order_title, c.full_name AS customer_name,
+  SELECT p.id, p.payment_date, p.amount, p.currency, p.method, p.reference, p.notes, p.is_advance, p.overpayment_confirmed,
+         p.voided, p.voided_at, p.void_reason, vb.full_name AS voided_by_name, p.receipt_number, p.received_from,
+         p.order_id, o.number AS order_number, o.title AS order_title, o.customer_id, c.full_name AS customer_name,
+         c.document_type AS customer_document_type, c.document_number AS customer_document_number,
+         o.total AS order_total, CAST(o.total - ac.paid_until AS DECIMAL(12, 2)) AS balance_after,
          p.branch_id, b.name AS branch_name, cb.full_name AS created_by_name, p.created_at
     FROM dbo.payments p
     JOIN dbo.orders o ON o.id = p.order_id
@@ -3833,11 +4208,19 @@ BEGIN
     JOIN dbo.branches b ON b.id = p.branch_id
     LEFT JOIN dbo.profiles vb ON vb.id = p.voided_by
     LEFT JOIN dbo.profiles cb ON cb.id = p.created_by
+    -- Pagado hasta este pago inclusive (sin anulados): saldo que quedó al emitir el recibo
+   CROSS APPLY (SELECT ISNULL(SUM(x.amount), 0) AS paid_until
+                  FROM dbo.payments x
+                 WHERE x.order_id = p.order_id AND x.voided = 0
+                   AND (x.payment_date < p.payment_date
+                        OR (x.payment_date = p.payment_date AND x.created_at <= p.created_at))) ac
    WHERE p.org_id = @org_id
      AND (p.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id))
           OR p.order_id IN (SELECT id FROM dbo.fn_visible_orders(@user_id, NULL)))
      AND (@order_id IS NULL OR p.order_id = @order_id)
+     AND (@customer_id IS NULL OR o.customer_id = @customer_id)
      AND (@branch_id IS NULL OR p.branch_id = @branch_id)
+     AND (@method IS NULL OR p.method = @method)
      AND (@from IS NULL OR p.payment_date >= @from)
      AND (@to IS NULL OR p.payment_date <= @to)
      AND (@include_voided = 1 OR p.voided = 0)
@@ -3855,13 +4238,14 @@ BEGIN
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT o.id, o.number, o.title, o.status, o.due_date, o.delivered_at, o.total, o.amount_paid, o.balance,
-         o.payment_status, o.customer_id, c.full_name AS customer_name, ISNULL(c.whatsapp, c.phone) AS customer_phone,
-         o.branch_id, b.name AS branch_name
+  SELECT o.*, c.full_name AS customer_name, ISNULL(c.whatsapp, c.phone) AS customer_phone,
+         b.name AS branch_name, st.name AS service_name, a.full_name AS assignee_name
     FROM dbo.orders o
     JOIN dbo.fn_visible_orders(@user_id, NULL) v ON v.id = o.id
     JOIN dbo.customers c ON c.id = o.customer_id
     JOIN dbo.branches b ON b.id = o.branch_id
+    JOIN dbo.service_types st ON st.id = o.service_type_id
+    LEFT JOIN dbo.profiles a ON a.id = o.assigned_to
    WHERE o.status <> N'CANCELADO' AND o.balance > 0
      AND (@branch_id IS NULL OR o.branch_id = @branch_id)
    ORDER BY o.balance DESC;
@@ -3958,7 +4342,9 @@ BEGIN
       SELECT @o_balance = balance FROM dbo.orders WHERE id = @order_id;
       SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' registró la entrega ', @number, N' del pedido ', @o_number,
                         CASE WHEN @conformity = 1 THEN N' con conformidad del cliente' ELSE N' SIN conformidad del cliente' END,
-                        CASE WHEN @o_balance > 0 THEN N'. Saldo pendiente: ' + dbo.fn_format_money(@o_balance) ELSE N'' END, N'.');
+                        CASE WHEN @o_balance > 0
+                             THEN N'. Saldo pendiente: ' + dbo.fn_format_amount(@o_balance, (SELECT currency FROM dbo.orders WHERE id = @order_id))
+                             ELSE N'' END, N'.');
       EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'ENTREGA', @msg;
       IF @o_status NOT IN (N'ENTREGADO', N'CERRADO')
       BEGIN
@@ -4022,7 +4408,7 @@ GO
 
 CREATE OR ALTER PROCEDURE api.usp_deliveries_list
   @user_id    UNIQUEIDENTIFIER,
-  @status     NVARCHAR(20) = NULL,
+  @statuses   NVARCHAR(200) = NULL,       -- 'PENDIENTE,LISTA' (NULL = todos)
   @branch_id  UNIQUEIDENTIFIER = NULL,
   @order_id   UNIQUEIDENTIFIER = NULL,
   @from       DATE = NULL,
@@ -4046,7 +4432,7 @@ BEGIN
    WHERE d.org_id = @org_id
      AND (d.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id))
           OR d.order_id IN (SELECT id FROM dbo.fn_visible_orders(@user_id, NULL)))
-     AND (@status IS NULL OR d.status = @status)
+     AND (@statuses IS NULL OR d.status IN (SELECT LTRIM(RTRIM(value)) FROM STRING_SPLIT(@statuses, N',')))
      AND (@branch_id IS NULL OR d.branch_id = @branch_id)
      AND (@order_id IS NULL OR d.order_id = @order_id)
      AND (@from IS NULL OR d.scheduled_date >= @from)
@@ -4163,7 +4549,7 @@ BEGIN
   EXEC dbo.usp_int_ctx @user_id, NULL, 0, @org_id OUTPUT, @role OUTPUT;
   SET @month_start = DATEFROMPARTS(YEAR(@today), MONTH(@today), 1);
 
-  SELECT o.id, o.number, o.status, o.title, o.due_date, o.total, o.balance, o.customer_id, o.service_type_id,
+  SELECT o.id, o.number, o.status, o.title, o.due_date, o.total, o.balance, o.currency, o.customer_id, o.service_type_id,
          dbo.fn_local_date(o.created_at) AS created_date,
          CAST(CASE WHEN o.status NOT IN (N'ENTREGADO', N'CERRADO', N'CANCELADO') THEN 1 ELSE 0 END AS BIT) AS is_active
     INTO #o
@@ -4171,14 +4557,14 @@ BEGIN
     JOIN dbo.fn_visible_orders(@user_id, NULL) v ON v.id = o.id
    WHERE @branch_id IS NULL OR o.branch_id = @branch_id;
 
-  SELECT q.id, q.number, q.status, q.expiry_date, q.total, q.customer_id
+  SELECT q.id, q.number, q.status, q.expiry_date, q.total, q.currency, q.customer_id
     INTO #q
     FROM dbo.quotations q
    WHERE q.org_id = @org_id AND @role IN (N'ADMIN', N'GERENTE', N'VENDEDOR')
      AND q.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id))
      AND (@branch_id IS NULL OR q.branch_id = @branch_id);
 
-  SELECT p.amount, p.payment_date
+  SELECT p.amount, p.currency, p.payment_date
     INTO #p
     FROM dbo.payments p
    WHERE p.org_id = @org_id AND p.voided = 0 AND @role IN (N'ADMIN', N'GERENTE', N'VENDEDOR')
@@ -4193,9 +4579,13 @@ BEGIN
         (SELECT COUNT(*) FROM #o WHERE is_active = 1 AND status IN (N'DISENO', N'PRODUCCION', N'CONTROL_CALIDAD')) AS in_production,
         (SELECT COUNT(*) FROM #o WHERE status = N'LISTO_ENTREGA') AS ready_to_deliver,
         (SELECT COUNT(*) FROM #q WHERE status IN (N'BORRADOR', N'ENVIADA')) AS pending_quotations,
-        (SELECT ISNULL(SUM(total), 0) FROM #o WHERE status <> N'CANCELADO' AND created_date >= @month_start) AS sales_month,
-        (SELECT ISNULL(SUM(amount), 0) FROM #p WHERE payment_date >= @month_start) AS collected_month,
-        (SELECT ISNULL(SUM(balance), 0) FROM #o WHERE status <> N'CANCELADO' AND balance > 0) AS receivable,
+        -- Montos en soles; los pedidos en dólares se informan aparte (*_usd)
+        (SELECT ISNULL(SUM(total), 0) FROM #o WHERE currency = N'PEN' AND status <> N'CANCELADO' AND created_date >= @month_start) AS sales_month,
+        (SELECT ISNULL(SUM(total), 0) FROM #o WHERE currency = N'USD' AND status <> N'CANCELADO' AND created_date >= @month_start) AS sales_month_usd,
+        (SELECT ISNULL(SUM(amount), 0) FROM #p WHERE currency = N'PEN' AND payment_date >= @month_start) AS collected_month,
+        (SELECT ISNULL(SUM(amount), 0) FROM #p WHERE currency = N'USD' AND payment_date >= @month_start) AS collected_month_usd,
+        (SELECT ISNULL(SUM(balance), 0) FROM #o WHERE currency = N'PEN' AND status <> N'CANCELADO' AND balance > 0) AS receivable,
+        (SELECT ISNULL(SUM(balance), 0) FROM #o WHERE currency = N'USD' AND status <> N'CANCELADO' AND balance > 0) AS receivable_usd,
         (SELECT COUNT(*) FROM #o WHERE is_active = 1 AND due_date < @today AND status <> N'PAUSADO') AS overdue_orders
         FOR JSON PATH, WITHOUT_ARRAY_WRAPPER)) AS kpis,
 
@@ -4204,10 +4594,10 @@ BEGIN
 
       JSON_QUERY(ISNULL((SELECT FORMAT(m.month_start, 'yyyy-MM') AS [month],
                                 (SELECT ISNULL(SUM(total), 0) FROM #o
-                                  WHERE status <> N'CANCELADO' AND created_date >= m.month_start
+                                  WHERE currency = N'PEN' AND status <> N'CANCELADO' AND created_date >= m.month_start
                                     AND created_date < DATEADD(MONTH, 1, m.month_start)) AS sales,
                                 (SELECT ISNULL(SUM(amount), 0) FROM #p
-                                  WHERE payment_date >= m.month_start AND payment_date < DATEADD(MONTH, 1, m.month_start)) AS collected
+                                  WHERE currency = N'PEN' AND payment_date >= m.month_start AND payment_date < DATEADD(MONTH, 1, m.month_start)) AS collected
                            FROM (SELECT DATEADD(MONTH, -n, @month_start) AS month_start
                                    FROM (VALUES (0), (1), (2), (3), (4), (5)) t(n)) m
                           ORDER BY m.month_start
@@ -4228,7 +4618,7 @@ BEGIN
                           ORDER BY MIN(ops.position)
                           FOR JSON PATH), N'[]')) AS production_by_stage,
 
-      JSON_QUERY(ISNULL((SELECT TOP (10) o.id, o.number, c.full_name AS customer_name, o.title, o.due_date, o.status, o.balance
+      JSON_QUERY(ISNULL((SELECT TOP (10) o.id, o.number, c.full_name AS customer_name, o.title, o.due_date, o.status, o.balance, o.currency
                            FROM #o o JOIN dbo.customers c ON c.id = o.customer_id
                           WHERE o.is_active = 1 AND o.due_date IS NOT NULL AND o.status <> N'PAUSADO'
                           ORDER BY o.due_date
@@ -4240,12 +4630,12 @@ BEGIN
                             WHERE o.is_active = 1 AND o.due_date < @today AND o.status <> N'PAUSADO'
                             ORDER BY o.due_date
                             FOR JSON PATH), N'[]')) AS overdue,
-        JSON_QUERY(ISNULL((SELECT TOP (10) q.id, q.number, c.full_name AS customer_name, q.expiry_date, q.total
+        JSON_QUERY(ISNULL((SELECT TOP (10) q.id, q.number, c.full_name AS customer_name, q.expiry_date, q.total, q.currency
                              FROM #q q JOIN dbo.customers c ON c.id = q.customer_id
                             WHERE q.status IN (N'BORRADOR', N'ENVIADA')
                             ORDER BY q.expiry_date
                             FOR JSON PATH), N'[]')) AS pending_quotations,
-        JSON_QUERY(ISNULL((SELECT TOP (10) o.id, o.number, c.full_name AS customer_name, o.balance
+        JSON_QUERY(ISNULL((SELECT TOP (10) o.id, o.number, c.full_name AS customer_name, o.balance, o.currency
                              FROM #o o JOIN dbo.customers c ON c.id = o.customer_id
                             WHERE o.status IN (N'LISTO_ENTREGA', N'ENTREGADO') AND o.balance > 0
                             ORDER BY o.balance DESC
@@ -4274,7 +4664,8 @@ CREATE OR ALTER PROCEDURE api.usp_report_sales
   @service_type_id  UNIQUEIDENTIFIER = NULL,
   @customer_id      UNIQUEIDENTIFIER = NULL,
   @assigned_to      UNIQUEIDENTIFIER = NULL,
-  @branch_id        UNIQUEIDENTIFIER = NULL
+  @branch_id        UNIQUEIDENTIFIER = NULL,
+  @currency         NVARCHAR(3) = NULL          -- PEN | USD (NULL = todas)
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -4283,7 +4674,7 @@ BEGIN
 
   SELECT o.id, o.number, dbo.fn_local_date(o.created_at) AS order_date, b.name AS branch_name, c.full_name AS customer_name,
          st.name AS service_name, o.title, pr.full_name AS assignee_name, o.status, o.subtotal, o.discount_total,
-         o.tax_amount, o.total, o.amount_paid, o.balance
+         o.tax_amount, o.total, o.amount_paid, o.balance, o.currency
     FROM dbo.orders o
     JOIN dbo.branches b ON b.id = o.branch_id
     JOIN dbo.customers c ON c.id = o.customer_id
@@ -4295,6 +4686,7 @@ BEGIN
      AND (@customer_id IS NULL OR o.customer_id = @customer_id)
      AND (@assigned_to IS NULL OR o.assigned_to = @assigned_to)
      AND (@branch_id IS NULL OR o.branch_id = @branch_id)
+     AND (@currency IS NULL OR o.currency = @currency)
    ORDER BY o.created_at;
 END
 GO
@@ -4303,7 +4695,8 @@ GO
 CREATE OR ALTER PROCEDURE api.usp_report_receivables
   @user_id      UNIQUEIDENTIFIER,
   @customer_id  UNIQUEIDENTIFIER = NULL,
-  @branch_id    UNIQUEIDENTIFIER = NULL
+  @branch_id    UNIQUEIDENTIFIER = NULL,
+  @currency     NVARCHAR(3) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
@@ -4319,7 +4712,7 @@ BEGIN
     FROM (
       SELECT o.id, o.number, b.name AS branch_name, c.full_name AS customer_name,
              ISNULL(c.whatsapp, c.phone) AS customer_phone, o.title, o.status, o.due_date, o.delivered_at,
-             r.reference_date, o.total, o.amount_paid, o.balance, DATEDIFF(DAY, r.reference_date, @today) AS days_old
+             r.reference_date, o.total, o.amount_paid, o.balance, o.currency, DATEDIFF(DAY, r.reference_date, @today) AS days_old
         FROM dbo.orders o
         JOIN dbo.branches b ON b.id = o.branch_id
         JOIN dbo.customers c ON c.id = o.customer_id
@@ -4327,6 +4720,7 @@ BEGIN
        WHERE o.org_id = @org_id AND o.status <> N'CANCELADO' AND o.balance > 0
          AND (@customer_id IS NULL OR o.customer_id = @customer_id)
          AND (@branch_id IS NULL OR o.branch_id = @branch_id)
+         AND (@currency IS NULL OR o.currency = @currency)
     ) x
    ORDER BY x.days_old DESC;
 END
@@ -4339,15 +4733,16 @@ CREATE OR ALTER PROCEDURE api.usp_report_collections
   @to              DATE,
   @method          NVARCHAR(20) = NULL,
   @include_voided  BIT = 0,
-  @branch_id       UNIQUEIDENTIFIER = NULL
+  @branch_id       UNIQUEIDENTIFIER = NULL,
+  @currency        NVARCHAR(3) = NULL
 AS
 BEGIN
   SET NOCOUNT ON;
   DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
   EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE', 0, @org_id OUTPUT, @role OUTPUT;
 
-  SELECT p.id, p.payment_date, b.name AS branch_name, o.id AS order_id, o.number AS order_number,
-         c.full_name AS customer_name, p.method, p.reference, p.is_advance, p.amount, p.voided, p.void_reason,
+  SELECT p.id, p.payment_date, b.name AS branch_name, o.id AS order_id, o.number AS order_number, p.receipt_number,
+         c.full_name AS customer_name, p.method, p.reference, p.is_advance, p.amount, p.currency, p.voided, p.void_reason,
          vb.full_name AS voided_by_name, cb.full_name AS created_by_name
     FROM dbo.payments p
     JOIN dbo.branches b ON b.id = p.branch_id
@@ -4360,6 +4755,7 @@ BEGIN
      AND (@method IS NULL OR p.method = @method)
      AND (@include_voided = 1 OR p.voided = 0)
      AND (@branch_id IS NULL OR p.branch_id = @branch_id)
+     AND (@currency IS NULL OR p.currency = @currency)
    ORDER BY p.payment_date, p.created_at;
 END
 GO
@@ -4379,7 +4775,7 @@ BEGIN
 
   SELECT o.id, o.number, b.name AS branch_name, c.full_name AS customer_name, ISNULL(c.whatsapp, c.phone) AS customer_phone,
          o.title, o.status, o.priority, o.current_stage_name, o.progress, pr.full_name AS assignee_name, o.due_date,
-         DATEDIFF(DAY, @today, o.due_date) AS days_left, o.balance
+         DATEDIFF(DAY, @today, o.due_date) AS days_left, o.balance, o.currency
     FROM dbo.orders o
     JOIN dbo.branches b ON b.id = o.branch_id
     JOIN dbo.customers c ON c.id = o.customer_id
@@ -4806,6 +5202,382 @@ BEGIN
      AND (DATEDIFF(DAY, @today, s.current_period_end) IN (7, 3, 1, 0)
           OR @today = DATEADD(DAY, 1, s.current_period_end)
           OR (s.status = N'ACTIVE' AND s.grace_days > 0 AND @today = DATEADD(DAY, s.grace_days + 1, s.current_period_end)));
+END
+GO
+
+/* ---------------------------------------------------------------------
+   4.17 Documentos comerciales y joyeros
+   - Proforma (PRO) y orden de producción (OP): un número por pedido,
+     asignado al emitirlo por primera vez; las reimpresiones lo reutilizan.
+   - Recibo de ingreso (RI): uno por cobro (usp_payment_register).
+   - Recibo de egreso (RE): pago a un joyero externo, siempre por pedido.
+   --------------------------------------------------------------------- */
+
+-- Emite (o reimprime) la proforma o la orden de producción del pedido
+CREATE OR ALTER PROCEDURE api.usp_order_issue_document
+  @user_id   UNIQUEIDENTIFIER,
+  @order_id  UNIQUEIDENTIFIER,
+  @doc_type  NVARCHAR(3)          -- PRO | OP
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @number NVARCHAR(30), @order_number NVARCHAR(30),
+            @msg NVARCHAR(2048), @now DATETIMEOFFSET(3) = dbo.fn_now();
+    IF @doc_type NOT IN (N'PRO', N'OP') THROW 50000, N'Tipo de documento no válido.', 1;
+    IF @doc_type = N'PRO'
+      EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 0, @org_id OUTPUT, @role OUTPUT;
+    ELSE
+      EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR,SUPERVISOR', 0, @org_id OUTPUT, @role OUTPUT;
+    EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
+
+    SELECT @order_number = number,
+           @number = CASE WHEN @doc_type = N'PRO' THEN proforma_number ELSE production_number END
+      FROM dbo.orders WITH (UPDLOCK) WHERE id = @order_id;
+
+    IF @number IS NULL
+    BEGIN
+      IF dbo.fn_org_can_write(@org_id) = 0
+        THROW 50002, N'El plan de su empresa está vencido: el sistema está en modo solo lectura. Regularice el pago para seguir registrando información.', 1;
+      EXEC dbo.usp_int_next_document_number @org_id, @doc_type, @number OUTPUT;
+      IF @doc_type = N'PRO'
+        UPDATE dbo.orders SET proforma_number = @number, proforma_issued_at = @now, updated_at = @now WHERE id = @order_id;
+      ELSE
+        UPDATE dbo.orders SET production_number = @number, production_issued_at = @now, updated_at = @now WHERE id = @order_id;
+
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' emitió ',
+                        CASE WHEN @doc_type = N'PRO' THEN N'la proforma ' ELSE N'la orden de producción ' END,
+                        @number, N' del pedido ', @order_number, N'.');
+      EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'DOCUMENTO', @msg, NULL, @number;
+    END
+    COMMIT;
+    SELECT @number AS number;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+-- Recibo de ingreso de un pago (asigna número a los pagos anteriores a esta versión)
+CREATE OR ALTER PROCEDURE api.usp_payment_issue_receipt
+  @user_id     UNIQUEIDENTIFIER,
+  @payment_id  UNIQUEIDENTIFIER
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @order_id UNIQUEIDENTIFIER, @receipt NVARCHAR(30);
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR', 0, @org_id OUTPUT, @role OUTPUT;
+
+    SELECT @order_id = order_id, @receipt = receipt_number FROM dbo.payments WITH (UPDLOCK)
+     WHERE id = @payment_id AND org_id = @org_id;
+    IF @order_id IS NULL THROW 50004, N'Pago no encontrado.', 1;
+    EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
+
+    IF @receipt IS NULL
+    BEGIN
+      IF dbo.fn_org_can_write(@org_id) = 0
+        THROW 50002, N'El plan de su empresa está vencido: el sistema está en modo solo lectura. Regularice el pago para seguir registrando información.', 1;
+      EXEC dbo.usp_int_next_document_number @org_id, N'RI', @receipt OUTPUT;
+      UPDATE dbo.payments SET receipt_number = @receipt WHERE id = @payment_id;
+    END
+    COMMIT;
+    SELECT @receipt AS receipt_number;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+-- Orden de producción: joyero, material entregado, indicaciones y acabado (merma = peso entregado - peso devuelto)
+CREATE OR ALTER PROCEDURE api.usp_order_production_save
+  @user_id                  UNIQUEIDENTIFIER,
+  @order_id                 UNIQUEIDENTIFIER,
+  @jeweler_id               UNIQUEIDENTIFIER = NULL,
+  @material_delivered_at    DATE = NULL,
+  @material_weight_out      DECIMAL(10, 2) = NULL,
+  @production_instructions  NVARCHAR(2000) = NULL,
+  @product_delivered_at     DATE = NULL,
+  @weight_returned          DECIMAL(10, 2) = NULL,
+  @production_notes         NVARCHAR(1000) = NULL
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @number NVARCHAR(30), @msg NVARCHAR(2048),
+            @old_jeweler UNIQUEIDENTIFIER, @old_out DECIMAL(10, 2), @old_ret DECIMAL(10, 2),
+            @old_name NVARCHAR(150), @new_name NVARCHAR(150), @now DATETIMEOFFSET(3) = dbo.fn_now();
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR,SUPERVISOR', 1, @org_id OUTPUT, @role OUTPUT;
+    EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
+    EXEC dbo.usp_int_assert_order_editable @order_id, @user_id;
+
+    IF @jeweler_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM dbo.jewelers WHERE id = @jeweler_id AND org_id = @org_id)
+      THROW 50000, N'El joyero indicado no existe.', 1;
+    IF ISNULL(@material_weight_out, 1) <= 0 OR ISNULL(@weight_returned, 1) <= 0
+      THROW 50000, N'Los pesos deben ser mayores que cero.', 1;
+    IF @weight_returned IS NOT NULL AND @material_weight_out IS NULL
+      THROW 50000, N'Registre primero el peso del material entregado al joyero.', 1;
+    IF @product_delivered_at IS NOT NULL AND @material_delivered_at IS NOT NULL AND @product_delivered_at < @material_delivered_at
+      THROW 50000, N'La fecha de entrega del producto no puede ser anterior a la entrega del material.', 1;
+
+    SELECT @number = number, @old_jeweler = jeweler_id, @old_out = material_weight_out, @old_ret = weight_returned
+      FROM dbo.orders WITH (UPDLOCK) WHERE id = @order_id;
+
+    UPDATE dbo.orders
+       SET jeweler_id = @jeweler_id, material_delivered_at = @material_delivered_at,
+           material_weight_out = @material_weight_out,
+           production_instructions = NULLIF(LTRIM(RTRIM(@production_instructions)), N''),
+           product_delivered_at = @product_delivered_at, weight_returned = @weight_returned,
+           production_notes = NULLIF(LTRIM(RTRIM(@production_notes)), N''), updated_at = @now
+     WHERE id = @order_id;
+
+    IF EXISTS (SELECT @old_jeweler EXCEPT SELECT @jeweler_id)
+    BEGIN
+      SELECT @old_name = full_name FROM dbo.jewelers WHERE id = @old_jeweler;
+      SELECT @new_name = full_name FROM dbo.jewelers WHERE id = @jeweler_id;
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' asignó el pedido ', @number, N' al joyero ', ISNULL(@new_name, N'(sin joyero)'),
+                        CASE WHEN @old_name IS NOT NULL THEN N' (antes: ' + @old_name + N')' ELSE N'' END, N'.');
+      EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg, @old_name, @new_name;
+    END
+    IF EXISTS (SELECT @old_out EXCEPT SELECT @material_weight_out) AND @material_weight_out IS NOT NULL
+    BEGIN
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' registró ', dbo.fn_format_qty(@material_weight_out, 2),
+                        N' g de material entregado al taller.');
+      EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg;
+    END
+    IF EXISTS (SELECT @old_ret EXCEPT SELECT @weight_returned) AND @weight_returned IS NOT NULL
+    BEGIN
+      SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' registró ', dbo.fn_format_qty(@weight_returned, 2),
+                        N' g en el producto entregado por el taller (merma ',
+                        dbo.fn_format_qty(@material_weight_out - @weight_returned, 2), N' g).');
+      EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'PRODUCCION', @msg;
+    END
+    COMMIT;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+-- Joyeros con su actividad: pedidos activos y total pagado por moneda
+CREATE OR ALTER PROCEDURE api.usp_jewelers_list
+  @user_id           UNIQUEIDENTIFIER,
+  @include_inactive  BIT = 0
+AS
+BEGIN
+  SET NOCOUNT ON;
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
+  EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,VENDEDOR,SUPERVISOR', 0, @org_id OUTPUT, @role OUTPUT;
+
+  SELECT j.id, j.full_name, j.document_number, j.phone, j.specialty, j.notes, j.active, j.created_at, j.updated_at,
+         (SELECT COUNT(*) FROM dbo.orders o
+           WHERE o.jeweler_id = j.id AND o.status NOT IN (N'ENTREGADO', N'CERRADO', N'CANCELADO')) AS active_orders,
+         CASE WHEN @role IN (N'ADMIN', N'GERENTE') THEN
+           (SELECT ISNULL(SUM(amount), 0) FROM dbo.jeweler_payments
+             WHERE jeweler_id = j.id AND voided = 0 AND currency = N'PEN') END AS paid_pen,
+         CASE WHEN @role IN (N'ADMIN', N'GERENTE') THEN
+           (SELECT ISNULL(SUM(amount), 0) FROM dbo.jeweler_payments
+             WHERE jeweler_id = j.id AND voided = 0 AND currency = N'USD') END AS paid_usd
+    FROM dbo.jewelers j
+   WHERE j.org_id = @org_id AND (@include_inactive = 1 OR j.active = 1)
+   ORDER BY j.active DESC, j.full_name;
+END
+GO
+
+CREATE OR ALTER PROCEDURE api.usp_jeweler_save
+  @user_id          UNIQUEIDENTIFIER,
+  @id               UNIQUEIDENTIFIER = NULL,
+  @full_name        NVARCHAR(150),
+  @document_number  NVARCHAR(20) = NULL,
+  @phone            NVARCHAR(30) = NULL,
+  @specialty        NVARCHAR(100) = NULL,
+  @notes            NVARCHAR(1000) = NULL,
+  @active           BIT = 1
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @msg NVARCHAR(2048), @now DATETIMEOFFSET(3) = dbo.fn_now();
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE,SUPERVISOR', 1, @org_id OUTPUT, @role OUTPUT;
+
+    SET @full_name = LTRIM(RTRIM(ISNULL(@full_name, N'')));
+    SET @document_number = NULLIF(LTRIM(RTRIM(@document_number)), N'');
+    IF LEN(@full_name) = 0 THROW 50000, N'Indique el nombre del joyero.', 1;
+    IF @document_number IS NOT NULL AND @document_number COLLATE Latin1_General_BIN LIKE N'%[^0-9]%'
+      THROW 50000, N'El DNI solo debe contener números.', 1;
+    IF @document_number IS NOT NULL AND EXISTS (SELECT 1 FROM dbo.jewelers
+                                                  WHERE org_id = @org_id AND document_number = @document_number
+                                                    AND (@id IS NULL OR id <> @id))
+    BEGIN
+      SET @msg = CONCAT(N'Ya existe un joyero con el DNI ', @document_number, N'.');
+      THROW 50000, @msg, 1;
+    END
+
+    IF @id IS NULL
+    BEGIN
+      SET @id = NEWID();
+      INSERT INTO dbo.jewelers (id, org_id, full_name, document_number, phone, specialty, notes, active, created_at, updated_at)
+      VALUES (@id, @org_id, @full_name, @document_number, NULLIF(LTRIM(RTRIM(@phone)), N''),
+              NULLIF(LTRIM(RTRIM(@specialty)), N''), NULLIF(LTRIM(RTRIM(@notes)), N''), ISNULL(@active, 1), @now, @now);
+    END
+    ELSE
+    BEGIN
+      UPDATE dbo.jewelers
+         SET full_name = @full_name, document_number = @document_number, phone = NULLIF(LTRIM(RTRIM(@phone)), N''),
+             specialty = NULLIF(LTRIM(RTRIM(@specialty)), N''), notes = NULLIF(LTRIM(RTRIM(@notes)), N''),
+             active = ISNULL(@active, active), updated_at = @now
+       WHERE id = @id AND org_id = @org_id;
+      IF @@ROWCOUNT = 0 THROW 50004, N'Joyero no encontrado.', 1;
+    END
+    COMMIT;
+    SELECT @id AS id;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+-- Recibo de egreso: pago a un joyero por un pedido (en la moneda del pedido)
+CREATE OR ALTER PROCEDURE api.usp_jeweler_payment_register
+  @user_id       UNIQUEIDENTIFIER,
+  @order_id      UNIQUEIDENTIFIER,
+  @jeweler_id    UNIQUEIDENTIFIER,
+  @amount        DECIMAL(12, 2),
+  @method        NVARCHAR(20),
+  @concept       NVARCHAR(1000),
+  @payment_date  DATE = NULL,
+  @reference     NVARCHAR(100) = NULL,
+  @branch_id     UNIQUEIDENTIFIER = NULL
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @id UNIQUEIDENTIFIER = NEWID(), @number NVARCHAR(30),
+            @order_number NVARCHAR(30), @order_branch UNIQUEIDENTIFIER, @currency NVARCHAR(3), @jeweler NVARCHAR(150),
+            @msg NVARCHAR(2048), @now DATETIMEOFFSET(3) = dbo.fn_now();
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE', 1, @org_id OUTPUT, @role OUTPUT;
+    EXEC dbo.usp_int_assert_order_visible @user_id, @order_id;
+    EXEC dbo.usp_int_assert_order_editable @order_id, @user_id;
+
+    SELECT @jeweler = full_name FROM dbo.jewelers WHERE id = @jeweler_id AND org_id = @org_id;
+    IF @jeweler IS NULL THROW 50000, N'Seleccione un joyero válido.', 1;
+    IF ISNULL(@amount, 0) <= 0 THROW 50000, N'El monto debe ser mayor que cero.', 1;
+    IF LEN(LTRIM(ISNULL(@concept, N''))) = 0 THROW 50000, N'Indique el detalle del pago.', 1;
+    IF @method NOT IN (N'EFECTIVO', N'YAPE', N'PLIN', N'TRANSFERENCIA', N'TARJETA', N'CHEQUE', N'OTRO')
+      THROW 50000, N'Método de pago no válido.', 1;
+
+    SELECT @order_number = number, @order_branch = branch_id, @currency = currency FROM dbo.orders WHERE id = @order_id;
+    IF @branch_id IS NULL OR @branch_id = @order_branch SET @branch_id = @order_branch;
+    ELSE EXEC dbo.usp_int_resolve_branch @user_id, @org_id, @branch_id OUTPUT;
+
+    EXEC dbo.usp_int_next_document_number @org_id, N'RE', @number OUTPUT;
+    INSERT INTO dbo.jeweler_payments (id, org_id, branch_id, number, jeweler_id, order_id, payment_date, amount, currency,
+                                      method, reference, concept, created_by, created_at)
+    VALUES (@id, @org_id, @branch_id, @number, @jeweler_id, @order_id, ISNULL(@payment_date, dbo.fn_today()), @amount, @currency,
+            @method, NULLIF(LTRIM(RTRIM(@reference)), N''), LTRIM(RTRIM(@concept)), @user_id, @now);
+
+    SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' pagó ', dbo.fn_format_amount(@amount, @currency), N' al joyero ', @jeweler,
+                      N' por el pedido ', @order_number, N'. Recibo ', @number, N'.');
+    DECLARE @amount_txt NVARCHAR(50) = CAST(@amount AS NVARCHAR(50));
+    EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'EGRESO', @msg, NULL, @amount_txt;
+    COMMIT;
+    SELECT @id AS id, @number AS number;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+CREATE OR ALTER PROCEDURE api.usp_jeweler_payment_void
+  @user_id  UNIQUEIDENTIFIER,
+  @id       UNIQUEIDENTIFIER,
+  @reason   NVARCHAR(500)
+AS
+BEGIN
+  SET NOCOUNT ON; SET XACT_ABORT ON;
+  BEGIN TRY
+    BEGIN TRAN;
+    DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20), @order_id UNIQUEIDENTIFIER, @voided BIT, @amount DECIMAL(12, 2),
+            @currency NVARCHAR(3), @number NVARCHAR(30), @order_number NVARCHAR(30), @msg NVARCHAR(2048),
+            @now DATETIMEOFFSET(3) = dbo.fn_now();
+    EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE', 1, @org_id OUTPUT, @role OUTPUT;
+
+    SELECT @order_id = order_id, @voided = voided, @amount = amount, @currency = currency, @number = number
+      FROM dbo.jeweler_payments WITH (UPDLOCK) WHERE id = @id AND org_id = @org_id;
+    IF @order_id IS NULL THROW 50004, N'Recibo no encontrado.', 1;
+    IF @voided = 1 THROW 50000, N'El recibo ya está anulado.', 1;
+    IF LEN(LTRIM(ISNULL(@reason, N''))) = 0 THROW 50000, N'Indique el motivo de la anulación.', 1;
+    EXEC dbo.usp_int_assert_order_editable @order_id, @user_id;
+
+    UPDATE dbo.jeweler_payments SET voided = 1, voided_at = @now, voided_by = @user_id, void_reason = LTRIM(RTRIM(@reason))
+     WHERE id = @id;
+
+    SELECT @order_number = number FROM dbo.orders WHERE id = @order_id;
+    SET @msg = CONCAT(dbo.fn_user_name(@user_id), N' anuló el recibo de egreso ', @number, N' (',
+                      dbo.fn_format_amount(@amount, @currency), N') del pedido ', @order_number,
+                      N'. Motivo: ', LTRIM(RTRIM(@reason)), N'.');
+    DECLARE @amount_txt NVARCHAR(50) = CAST(@amount AS NVARCHAR(50));
+    EXEC dbo.usp_int_log_order_event @order_id, @user_id, N'EGRESO', @msg, @amount_txt, NULL;
+    COMMIT;
+  END TRY
+  BEGIN CATCH
+    IF @@TRANCOUNT > 0 ROLLBACK;
+    THROW;
+  END CATCH
+END
+GO
+
+-- Pagos a joyeros (reporte por joyero, pedido y periodo)
+CREATE OR ALTER PROCEDURE api.usp_jeweler_payments_list
+  @user_id         UNIQUEIDENTIFIER,
+  @jeweler_id      UNIQUEIDENTIFIER = NULL,
+  @order_id        UNIQUEIDENTIFIER = NULL,
+  @branch_id       UNIQUEIDENTIFIER = NULL,
+  @from            DATE = NULL,
+  @to              DATE = NULL,
+  @include_voided  BIT = 0
+AS
+BEGIN
+  SET NOCOUNT ON;
+  DECLARE @org_id UNIQUEIDENTIFIER, @role NVARCHAR(20);
+  EXEC dbo.usp_int_ctx @user_id, N'ADMIN,GERENTE', 0, @org_id OUTPUT, @role OUTPUT;
+
+  SELECT jp.id, jp.number, jp.jeweler_id, j.full_name AS jeweler_name, j.document_number AS jeweler_document,
+         jp.order_id, o.number AS order_number, o.title AS order_title, c.full_name AS customer_name,
+         jp.payment_date, jp.amount, jp.currency, jp.method, jp.reference, jp.concept,
+         jp.voided, jp.voided_at, jp.void_reason, vb.full_name AS voided_by_name,
+         jp.branch_id, b.name AS branch_name, cb.full_name AS created_by_name, jp.created_at
+    FROM dbo.jeweler_payments jp
+    JOIN dbo.jewelers j ON j.id = jp.jeweler_id
+    JOIN dbo.orders o ON o.id = jp.order_id
+    JOIN dbo.customers c ON c.id = o.customer_id
+    JOIN dbo.branches b ON b.id = jp.branch_id
+    LEFT JOIN dbo.profiles vb ON vb.id = jp.voided_by
+    LEFT JOIN dbo.profiles cb ON cb.id = jp.created_by
+   WHERE jp.org_id = @org_id
+     AND jp.branch_id IN (SELECT branch_id FROM dbo.fn_user_branch_ids(@user_id))
+     AND (@jeweler_id IS NULL OR jp.jeweler_id = @jeweler_id)
+     AND (@order_id IS NULL OR jp.order_id = @order_id)
+     AND (@branch_id IS NULL OR jp.branch_id = @branch_id)
+     AND (@from IS NULL OR jp.payment_date >= @from)
+     AND (@to IS NULL OR jp.payment_date <= @to)
+     AND (@include_voided = 1 OR jp.voided = 0)
+   ORDER BY jp.payment_date DESC, jp.created_at DESC;
 END
 GO
 

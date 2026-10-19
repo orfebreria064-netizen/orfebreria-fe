@@ -25,6 +25,14 @@
   }
 }
 
+.brand__logo {
+  flex: none;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  object-fit: contain;
+}
+
 .brand__mark {
   display: grid;
   place-items: center;

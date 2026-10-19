@@ -27,6 +27,8 @@ export class ItemsEditor implements OnInit {
   readonly items = input.required<FormArray<ItemFormGroup>>();
   readonly materials = input<Material[]>([]);
   readonly taxRate = input(18);
+  /** Moneda del documento (PEN / USD). */
+  readonly currency = input<string>('PEN');
 
   protected readonly units = UNIT_OPTIONS;
   /** Versión que cambia con cada edición para recalcular totales (los FormArray no son signals). */
@@ -67,5 +69,24 @@ export class ItemsEditor implements OnInit {
     if (material && (material.unit === 'g' || material.unit === 'ct') && group.controls.unit.value === 'und' && !group.controls.description.value) {
       group.controls.description.setValue(material.name);
     }
+    // Línea sin precio: se propone el precio del día del material (por su unidad).
+    if (material?.day_price != null && !group.controls.unit_price.value) this.applyDayPrice(group);
+  }
+
+  /** Precio del día del material de la línea, si tiene. */
+  protected dayPriceOf(group: ItemFormGroup): Material | null {
+    const material = this.materials().find((m) => m.id === group.controls.material_id.value);
+    return material?.day_price != null ? material : null;
+  }
+
+  protected dayPriceApplied(group: ItemFormGroup, material: Material): boolean {
+    return group.controls.unit.value === material.unit && Number(group.controls.unit_price.value) === Number(material.day_price);
+  }
+
+  protected applyDayPrice(group: ItemFormGroup): void {
+    const material = this.dayPriceOf(group);
+    if (!material) return;
+    group.controls.unit.setValue(material.unit);
+    group.controls.unit_price.setValue(Number(material.day_price));
   }
 }

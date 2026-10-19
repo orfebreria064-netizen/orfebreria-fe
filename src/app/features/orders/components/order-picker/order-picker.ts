@@ -33,7 +33,7 @@ import { OrdersService } from '../../services/orders.service';
       <ng-template #item let-o>
         <div>
           <div><strong>{{ o.number }}</strong> · {{ o.title }}</div>
-          <small class="muted">{{ o.customer?.full_name }} · Saldo {{ o.balance | money }}</small>
+          <small class="muted">{{ o.customer?.full_name }} · Saldo {{ o.balance | money: o.currency }}</small>
         </div>
       </ng-template>
     </p-autocomplete>

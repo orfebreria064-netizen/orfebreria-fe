@@ -146,7 +146,7 @@
                   <td class="nowrap">{{ q.issue_date | date: 'dd/MM/yyyy' }}</td>
                   <td>{{ q.title }}</td>
                   <td><app-status-tag [value]="q.status" [labels]="labels.quotation" [severities]="labels.quotationSeverity" /></td>
-                  <td class="text-right mono nowrap">{{ q.total | money }}</td>
+                  <td class="text-right mono nowrap">{{ q.total | money: q.currency }}</td>
                   <td class="nowrap">{{ q.order?.number ?? '—' }}</td>
                 </tr>
               </ng-template>
@@ -173,8 +173,8 @@
                 <td><app-status-tag [value]="o.status" [labels]="labels.order" [severities]="labels.orderSeverity" /></td>
                 <td style="min-width: 110px"><p-progressbar [value]="o.progress" [style]="{ height: '0.5rem' }" [showValue]="false" /></td>
                 <td class="nowrap">{{ o.due_date ? (o.due_date | date: 'dd/MM/yyyy') : '—' }}</td>
-                <td class="text-right mono nowrap">{{ o.total | money }}</td>
-                <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0">{{ o.balance | money }}</td>
+                <td class="text-right mono nowrap">{{ o.total | money: o.currency }}</td>
+                <td class="text-right mono nowrap" [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</td>
               </tr>
             </ng-template>
             <ng-template #emptymessage>
@@ -204,7 +204,7 @@
                     }
                   </td>
                   <td>{{ p.reference || '—' }}</td>
-                  <td class="text-right mono nowrap" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money }}</td>
+                  <td class="text-right mono nowrap" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money: p.currency }}</td>
                 </tr>
               </ng-template>
               <ng-template #emptymessage>

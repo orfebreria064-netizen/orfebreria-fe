@@ -93,7 +93,7 @@ import { QuotationsService } from '../../services/quotations.service';
                 <span class="muted small"> → {{ q.order.number }}</span>
               }
             </td>
-            <td class="text-right mono nowrap">{{ q.total | money }}</td>
+            <td class="text-right mono nowrap">{{ q.total | money: q.currency }}</td>
           </tr>
         </ng-template>
         <ng-template #emptymessage>

@@ -1,10 +1,10 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { PasswordModule } from 'primeng/password';
 import { MessageModule } from 'primeng/message';
-import { AuthService } from '../../../core/auth/auth.service';
+import { ActivationType, AuthService } from '../../../core/auth/auth.service';
 import { FieldError } from '../../../shared/components/field-error/field-error';
 
 function passwordsMatch(group: AbstractControl): ValidationErrors | null {
@@ -12,9 +12,9 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
 }
 
 /**
- * Destino de los enlaces de invitación y de recuperación de contraseña.
- * supabase-js toma la sesión del enlace (detectSessionInUrl) antes del arranque;
- * aquí el usuario define su contraseña y entra a la aplicación.
+ * Destino de los enlaces de invitación y de recuperación de contraseña:
+ * /activar-cuenta?tipo=invitacion|recuperacion&token=...
+ * El usuario define su contraseña y entra a la aplicación.
  */
 @Component({
   selector: 'app-set-password',
@@ -24,17 +24,22 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
       <div class="auth-brand">
         <span>Au</span>
         <div>
-          <h1>Crear contraseña</h1>
-          <p>{{ auth.session()?.user?.email ?? 'Activación de cuenta' }}</p>
+          <h1>{{ type === 'recuperacion' ? 'Nueva contraseña' : 'Crear contraseña' }}</h1>
+          <p>{{ invitation()?.email ?? 'Activación de cuenta' }}</p>
         </div>
       </div>
 
-      @if (!auth.isAuthenticated()) {
+      @if (checking()) {
+        <p class="muted">Verificando el enlace…</p>
+      } @else if (!valid()) {
         <p-message severity="warn" text="El enlace venció o ya fue utilizado. Solicite uno nuevo desde «¿Olvidó su contraseña?»." />
         <p class="auth-footer"><a routerLink="/login">Ir a iniciar sesión</a></p>
       } @else {
-        @if (auth.profile(); as p) {
-          <p class="muted">Bienvenido(a), <strong>{{ p.full_name }}</strong>. Defina la contraseña con la que ingresará al sistema.</p>
+        @if (invitation(); as inv) {
+          <p class="muted">
+            Bienvenido(a){{ inv.full_name ? ', ' : '' }}<strong>{{ inv.full_name }}</strong>. Defina la contraseña con la que
+            ingresará a {{ inv.company_name }}.
+          </p>
         }
         @if (error()) {
           <p-message severity="error" [text]="error()!" />
@@ -67,10 +72,17 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
   `,
   styleUrl: '../auth-shell.scss',
 })
-export class SetPassword {
+export class SetPassword implements OnInit {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
+  private readonly params = inject(ActivatedRoute).snapshot.queryParamMap;
 
+  protected readonly type: ActivationType = this.params.get('tipo') === 'recuperacion' ? 'recuperacion' : 'invitacion';
+  private readonly token = this.params.get('token') ?? '';
+
+  protected readonly checking = signal(true);
+  protected readonly valid = signal(false);
+  protected readonly invitation = signal<{ email: string; full_name: string | null; company_name: string } | null>(null);
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
 
@@ -82,6 +94,22 @@ export class SetPassword {
     { validators: passwordsMatch },
   );
 
+  async ngOnInit(): Promise<void> {
+    if (!this.token) {
+      this.checking.set(false);
+      return;
+    }
+    if (this.type === 'invitacion') {
+      const inv = await this.auth.invitation(this.token);
+      this.invitation.set(inv);
+      this.valid.set(inv !== null);
+    } else {
+      // La recuperación se valida al guardar (el token solo se consume una vez).
+      this.valid.set(true);
+    }
+    this.checking.set(false);
+  }
+
   async submit(): Promise<void> {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
@@ -90,9 +118,8 @@ export class SetPassword {
     this.loading.set(true);
     this.error.set(null);
     try {
-      await this.auth.updatePassword(this.form.getRawValue().password);
-      await this.auth.loadProfile();
-      // Limpia el fragmento con los tokens del enlace.
+      await this.auth.activateAccount(this.type, this.token, this.form.getRawValue().password);
+      // replaceUrl: el token no queda en el historial del navegador.
       await this.router.navigateByUrl(this.auth.isActive() ? this.auth.homeUrl() : '/cuenta-pendiente', { replaceUrl: true });
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'No se pudo guardar la contraseña.');

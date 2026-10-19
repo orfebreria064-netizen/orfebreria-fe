@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, output, signal } from '@angular/core';
+import { Component, effect, inject, input, output, signal, untracked } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
@@ -72,8 +72,9 @@ export class CustomerForm {
     );
     effect(() => {
       const c = this.customer();
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
       if (c) {
-        this.form.reset({
+        untracked(() => this.form.reset({
           person_type: c.person_type,
           first_name: c.first_name ?? '',
           last_name: c.last_name ?? '',
@@ -87,7 +88,7 @@ export class CustomerForm {
           city: c.city ?? '',
           notes: c.notes ?? '',
           active: c.active,
-        });
+        }));
       }
     });
   }

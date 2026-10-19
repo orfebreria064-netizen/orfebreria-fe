@@ -22,6 +22,7 @@
     <p-tablist>
       <p-tab value="stock"><i class="pi pi-box"></i> Inventario</p-tab>
       <p-tab value="movements"><i class="pi pi-arrow-right-arrow-left"></i> Movimientos</p-tab>
+      <p-tab value="prices"><i class="pi pi-dollar"></i> Precios del día</p-tab>
     </p-tablist>
     <p-tabpanels>
       <p-tabpanel value="stock">
@@ -76,6 +77,9 @@
           <p-select [options]="movementTypes" [(ngModel)]="movementType" (onChange)="loadMovements()" optionLabel="label" optionValue="value" placeholder="Todos los movimientos" [showClear]="true" [style]="{ minWidth: '220px' }" />
         </div>
         <app-movements-table [movements]="movements()" [loading]="loadingMovements()" />
+      </p-tabpanel>
+      <p-tabpanel value="prices">
+        <app-material-prices [canWrite]="canWrite" />
       </p-tabpanel>
     </p-tabpanels>
   </p-tabs>

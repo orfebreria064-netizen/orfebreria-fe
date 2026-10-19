@@ -13,7 +13,7 @@ import { AuthService } from '../../../core/auth/auth.service';
         <span>Au</span>
         <div>
           <h1>Usuario inactivo</h1>
-          <p>{{ auth.session()?.user?.email }}</p>
+          <p>{{ auth.email() }}</p>
         </div>
       </div>
       <p>

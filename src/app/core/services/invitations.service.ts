@@ -1,47 +1,32 @@
 import { Injectable, inject } from '@angular/core';
-import { FunctionsHttpError } from '@supabase/supabase-js';
-import { SupabaseService } from './supabase.service';
+import { ApiService } from './api.service';
 import { AppRole } from '../models/domain';
 import { Invitation } from '../models/subscription.model';
-import { AppError, unwrap } from '../../shared/utils/db';
 
 /**
- * Invitaciones de usuarios. La base de datos reserva el cupo del plan (create_invitation)
- * y la Edge Function send-invitation envía el correo con la clave de servicio.
+ * Invitaciones de usuarios. La base de datos reserva el cupo del plan y la API envía el correo
+ * con el enlace de activación (el token nunca llega al navegador).
  */
 @Injectable({ providedIn: 'root' })
 export class InvitationsService {
-  private readonly db = inject(SupabaseService).client;
+  private readonly api = inject(ApiService);
 
   async list(): Promise<Invitation[]> {
-    return unwrap(
-      await this.db.from('invitations').select('*').eq('status', 'PENDING').order('created_at', { ascending: false }),
-    ) as Invitation[];
+    const rows = await this.api.get<Invitation[]>('Seguridad/listarinvitaciones');
+    return rows.filter((i) => i.status === 'PENDING');
   }
 
-  /** ADMIN de empresa: reserva el cupo y envía el correo. */
-  async invite(email: string, fullName: string, role: AppRole): Promise<void> {
-    const id = unwrap(
-      await this.db.rpc('create_invitation', { p_email: email, p_full_name: fullName, p_role: role }),
-    ) as string;
-    await this.send(id);
+  /** ADMIN de empresa: reserva el cupo y envía el correo. branchIds null = sucursal principal. */
+  async invite(email: string, fullName: string, role: AppRole, branchIds: string[] | null = null): Promise<void> {
+    await this.api.procesar('Seguridad/invitar', { email, full_name: fullName, role, branch_ids: branchIds });
   }
 
-  /** Envía (o reintenta) el correo de una invitación pendiente. Si falla, la función la revoca. */
+  /** Reenvía el correo de una invitación pendiente (nuevo enlace, 7 días más). */
   async send(invitationId: string): Promise<void> {
-    const { error } = await this.db.functions.invoke('send-invitation', {
-      body: { invitation_id: invitationId, redirect_to: `${location.origin}/activar-cuenta` },
-    });
-    if (!error) return;
-    let message = 'No se pudo enviar el correo de invitación.';
-    if (error instanceof FunctionsHttpError) {
-      const body = await error.context.json().catch(() => null);
-      if (body?.error) message = body.error;
-    }
-    throw new AppError(message);
+    await this.api.procesar(`Seguridad/reenviarinvitacion/${invitationId}`);
   }
 
   async revoke(invitationId: string): Promise<void> {
-    unwrap(await this.db.rpc('revoke_invitation', { p_id: invitationId }));
+    await this.api.procesar(`Seguridad/revocarinvitacion/${invitationId}`);
   }
 }

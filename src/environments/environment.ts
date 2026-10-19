@@ -1,7 +1,5 @@
-// Producción. La clave publishable (anon) es pública por diseño: la seguridad la aplica RLS.
-// NUNCA colocar aquí la service_role key.
+// Producción: URL pública de la API AURUM (aurum-be). Ajustar al dominio donde se publique.
 export const environment = {
   production: true,
-  supabaseUrl: 'https://ynxnxdgzsykhobfujyio.supabase.co',
-  supabaseKey: 'sb_publishable_L_-KyV1pMz4nPbwP0rTklQ_YqbDQZuy',
+  apiUrl: '/api',
 };

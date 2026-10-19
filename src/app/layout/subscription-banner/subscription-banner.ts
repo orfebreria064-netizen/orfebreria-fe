@@ -2,6 +2,7 @@ import { Component, computed, inject } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { AuthService } from '../../core/auth/auth.service';
+import { SHOW_PLAN_TAB } from '../../core/config/platform';
 import { fromIsoDate } from '../../shared/utils/db';
 
 type Tone = 'info' | 'warn' | 'danger';
@@ -26,7 +27,9 @@ type Tone = 'info' | 'warn' | 'danger';
           }
         </span>
         @if (auth.hasRole('ADMIN')) {
-          <a routerLink="/settings" [queryParams]="{ tab: 'plan' }">{{ n.tone === 'info' ? 'Ver planes' : 'Renovar' }}</a>
+          @if (showPlanTab) {
+            <a routerLink="/settings" [queryParams]="{ tab: 'plan' }">{{ n.tone === 'info' ? 'Ver planes' : 'Renovar' }}</a>
+          }
         } @else {
           <span class="banner__hint">Avise al administrador de su empresa.</span>
         }
@@ -82,6 +85,7 @@ type Tone = 'info' | 'warn' | 'danger';
 })
 export class SubscriptionBanner {
   protected readonly auth = inject(AuthService);
+  protected readonly showPlanTab = SHOW_PLAN_TAB;
 
   protected readonly notice = computed<{ tone: Tone; icon: string; title: string; detail: string; date?: Date | null } | null>(() => {
     const s = this.auth.subscription();
