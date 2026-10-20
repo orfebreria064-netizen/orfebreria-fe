@@ -14,6 +14,8 @@ const AUTH_MESSAGES: Record<string, string> = {
   'Email not confirmed': 'Debe confirmar su correo electrónico antes de ingresar.',
   'User already registered': 'Ya existe una cuenta con ese correo.',
   'New password should be different from the old password.': 'La nueva contraseña debe ser distinta de la anterior.',
+  'email rate limit exceeded': 'Se alcanzó el límite de correos por hora. Intente nuevamente en unos minutos.',
+  'For security purposes, you can only request this after 60 seconds.': 'Por seguridad, espere un minuto antes de solicitar otro enlace.',
 };
 
 /** Sesión, perfil, plan de la empresa y rol de plataforma del usuario actual (signals). */
