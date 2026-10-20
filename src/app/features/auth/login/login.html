@@ -44,7 +44,8 @@
     <p class="auth-footer"><button type="button" class="link-button" (click)="switchMode('login')">Volver a iniciar sesión</button></p>
   } @else {
     <p class="muted">Ingrese su correo y le enviaremos un enlace para crear una nueva contraseña.</p>
-    <form (ngSubmit)="sendReset()" novalidate>
+    <!-- (submit) y no (ngSubmit): sin [formGroup] Angular no gestiona este <form> y el envío recargaría la página -->
+    <form (submit)="sendReset($event)" novalidate>
       <div class="field">
         <label for="reset-email">Correo electrónico</label>
         <input pInputText id="reset-email" type="email" [formControl]="form.controls.email" autocomplete="email" />

@@ -54,7 +54,8 @@ export class Login {
     this.error.set(null);
   }
 
-  async sendReset(): Promise<void> {
+  async sendReset(event?: Event): Promise<void> {
+    event?.preventDefault();
     const email = this.form.controls.email;
     if (email.invalid) {
       email.markAsTouched();
