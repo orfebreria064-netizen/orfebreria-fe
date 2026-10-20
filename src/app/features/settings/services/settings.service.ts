@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { SupabaseService } from '../../../core/services/supabase.service';
 import { AppRole } from '../../../core/models/domain';
-import { CompanySettings, ProductionStageTemplate, ServiceType } from '../../../core/models/catalog.model';
+import { CompanySettings, ProductionStageTemplate, ServiceType, StatementSend } from '../../../core/models/catalog.model';
 import { Profile } from '../../../core/models/profile.model';
 import { Plan, SubscriptionPayment } from '../../../core/models/subscription.model';
 import { emptyToNull, unwrap } from '../../../shared/utils/db';
@@ -13,6 +13,17 @@ export class SettingsService {
 
   async updateCompany(orgId: string, patch: Partial<Omit<CompanySettings, 'org_id'>>): Promise<void> {
     unwrap(await this.db.from('settings').update(emptyToNull(patch)).eq('org_id', orgId));
+  }
+
+  /** Últimos correos automáticos enviados (estados de cuenta y cierres de caja). RLS: ADMIN y GERENTE. */
+  async statementSends(limit = 30): Promise<StatementSend[]> {
+    return unwrap(
+      await this.db
+        .from('statement_sends')
+        .select('id, kind, statement_date, recipients, status, detail, created_at, customer:customers(full_name)')
+        .order('created_at', { ascending: false })
+        .limit(limit),
+    ) as unknown as StatementSend[];
   }
 
   async users(): Promise<Profile[]> {

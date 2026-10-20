@@ -30,6 +30,21 @@ export interface CompanySettings {
   slogan: string | null;
   mobile: string | null;
   city: string | null;
+  /** Correos al cierre del día: estado de cuenta a clientes y cierre de caja (hora de Lima, 0-23). */
+  daily_statements_enabled: boolean;
+  daily_statements_hour: number;
+}
+
+/** Registro de correos automáticos enviados (statement_sends). */
+export interface StatementSend {
+  id: string;
+  kind: 'CLIENTE' | 'CIERRE';
+  statement_date: string;
+  recipients: string[];
+  status: 'ENVIADO' | 'ERROR';
+  detail: string | null;
+  created_at: string;
+  customer: { full_name: string } | null;
 }
 
 export interface Branch {

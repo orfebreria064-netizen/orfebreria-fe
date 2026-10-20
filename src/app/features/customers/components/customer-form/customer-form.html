@@ -68,6 +68,11 @@
         <textarea pTextarea id="notes" formControlName="notes" rows="3" [autoResize]="true"></textarea>
         <app-field-error [control]="form.controls.notes" />
       </div>
+      <div class="field">
+        <label for="statement_email">Enviar estado de cuenta por correo</label>
+        <p-toggleswitch inputId="statement_email" formControlName="statement_email" />
+        <small class="muted">Resumen de sus pagos y saldo al cierre de cada día con movimientos. Requiere correo.</small>
+      </div>
       @if (customer()) {
         <div class="field">
           <label for="active">Cliente activo</label>

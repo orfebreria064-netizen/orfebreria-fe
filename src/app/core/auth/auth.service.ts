@@ -129,6 +129,7 @@ export class AuthService {
 
   /** Página inicial según rol. */
   homeUrl(): string {
+    if (this.isPlatformOnly()) return '/plataforma';
     switch (this.role()) {
       case 'ADMIN':
       case 'GERENTE':

@@ -15,6 +15,8 @@ export interface Customer {
   address: string | null;
   city: string | null;
   notes: string | null;
+  /** Recibe el estado de cuenta diario por correo (consentimiento del cliente). */
+  statement_email: boolean;
   active: boolean;
   created_at: string;
   updated_at: string;

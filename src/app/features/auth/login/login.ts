@@ -37,8 +37,9 @@ export class Login {
     this.error.set(null);
     try {
       const { email, password } = this.form.getRawValue();
-      const profile = await this.auth.signIn(email.trim(), password);
-      const url = !profile?.active ? '/cuenta-pendiente' : this.auth.isBlocked() ? '/cuenta-suspendida' : this.auth.homeUrl();
+      await this.auth.signIn(email.trim(), password);
+      // isActive incluye al superadministrador sin empresa (sin perfil)
+      const url = !this.auth.isActive() ? '/cuenta-pendiente' : this.auth.isBlocked() ? '/cuenta-suspendida' : this.auth.homeUrl();
       await this.router.navigateByUrl(url);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');

@@ -12,12 +12,13 @@ import { SelectModule } from 'primeng/select';
 import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { CheckboxModule } from 'primeng/checkbox';
 import { TagModule } from 'primeng/tag';
+import { TooltipModule } from 'primeng/tooltip';
 import { MessageModule } from 'primeng/message';
 import { DialogModule } from 'primeng/dialog';
 import { ProgressBarModule } from 'primeng/progressbar';
 import { AuthService } from '../../../../core/auth/auth.service';
 import { AppRole, ROLE_LABELS, ROLE_OPTIONS } from '../../../../core/models/domain';
-import { ProductionStageTemplate, ServiceType } from '../../../../core/models/catalog.model';
+import { ProductionStageTemplate, ServiceType, StatementSend } from '../../../../core/models/catalog.model';
 import { Profile } from '../../../../core/models/profile.model';
 import { LookupService } from '../../../../core/services/lookup.service';
 import { NotifyService } from '../../../../core/services/notify.service';
@@ -58,6 +59,7 @@ import { SettingsService } from '../../services/settings.service';
     ToggleSwitchModule,
     CheckboxModule,
     TagModule,
+    TooltipModule,
     MessageModule,
     PageHeader,
     FieldError,
@@ -134,7 +136,14 @@ export class Settings implements OnInit {
     slogan: ['', Validators.maxLength(500)],
     mobile: ['', Validators.maxLength(80)],
     city: ['', Validators.maxLength(60)],
+    // Correos automáticos al cierre del día
+    daily_statements_enabled: [false],
+    daily_statements_hour: [20, [Validators.required, Validators.min(0), Validators.max(23)]],
   });
+
+  protected readonly statementSends = signal<StatementSend[]>([]);
+  /** De 5 p. m. a 11 p. m. (hora de Lima). */
+  protected readonly statementHours = [17, 18, 19, 20, 21, 22, 23].map((h) => ({ value: h, label: `${h - 12}:00 p. m.` }));
 
   async ngOnInit(): Promise<void> {
     try {
@@ -154,21 +163,25 @@ export class Settings implements OnInit {
           slogan: s.slogan ?? '',
           mobile: s.mobile ?? '',
           city: s.city ?? '',
+          daily_statements_enabled: s.daily_statements_enabled ?? false,
+          daily_statements_hour: s.daily_statements_hour ?? 20,
         });
       }
       this.stages.set(this.lookups.stageTemplates());
       this.serviceTypes.set(this.lookups.serviceTypes());
-      const [users, invitations, plans, payments] = await Promise.all([
+      const [users, invitations, plans, payments, sends] = await Promise.all([
         this.service.users(),
         this.invitationsService.list(),
         this.service.plans(),
         this.service.subscriptionPayments(),
+        this.service.statementSends(),
         this.auth.refreshSubscription(),
       ]);
       this.users.set(users);
       this.invitations.set(invitations);
       this.plans.set(plans);
       this.payments.set(payments);
+      this.statementSends.set(sends);
     } catch (err) {
       this.notify.error(err, 'No se pudo cargar la configuración.');
     }

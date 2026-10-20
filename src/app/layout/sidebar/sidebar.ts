@@ -38,7 +38,7 @@ const NAV: NavItem[] = [
         }
         <div>
           <strong>{{ c.company_name }}</strong>
-          <small>Aurum · Gestión de orfebrería</small>
+          <small>Gestión</small>
         </div>
       } @else {
         <span class="brand__mark">Au</span>

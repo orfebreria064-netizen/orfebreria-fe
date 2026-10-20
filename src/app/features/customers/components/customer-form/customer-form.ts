@@ -59,6 +59,7 @@ export class CustomerForm {
     address: ['', [Validators.maxLength(200)]],
     city: ['', [Validators.maxLength(80)]],
     notes: ['', [Validators.maxLength(1000)]],
+    statement_email: [true],
     active: [true],
   });
 
@@ -87,6 +88,7 @@ export class CustomerForm {
           address: c.address ?? '',
           city: c.city ?? '',
           notes: c.notes ?? '',
+          statement_email: c.statement_email ?? true,
           active: c.active,
         }));
       }

@@ -91,6 +91,48 @@
             <label for="st-city">Ciudad (para los recibos)</label>
             <input pInputText id="st-city" formControlName="city" placeholder="Lima" />
           </div>
+
+          <h3 class="section-title field--full" style="margin-bottom: 0">Correos automáticos</h3>
+          <p class="muted small field--full" style="margin: 0">
+            Al cierre del día, cada cliente que pagó o dio un adelanto recibe su estado de cuenta (movimientos del día y saldo
+            de sus pedidos), y los administradores y gerentes reciben el cierre de caja. Si el cliente responde, la respuesta
+            llega al correo de la empresa indicado arriba.
+          </p>
+          <div class="field field--span-2 row" style="align-items: center; gap: 0.75rem">
+            <p-toggleswitch inputId="st-statements" formControlName="daily_statements_enabled" />
+            <label for="st-statements" style="margin: 0">Enviar estados de cuenta y cierre de caja por correo</label>
+          </div>
+          <div class="field">
+            <label for="st-statements-hour">Hora de envío</label>
+            <p-select
+              inputId="st-statements-hour"
+              formControlName="daily_statements_hour"
+              [options]="statementHours"
+              optionLabel="label"
+              optionValue="value"
+              [fluid]="true"
+            />
+          </div>
+          @if (statementSends().length) {
+            <div class="field field--full">
+              <span class="label">Últimos envíos</span>
+              <p-table [value]="statementSends()" size="small" [scrollable]="true" scrollHeight="260px">
+                <ng-template #header>
+                  <tr><th>Fecha</th><th>Tipo</th><th>Para</th><th>Estado</th></tr>
+                </ng-template>
+                <ng-template #body let-s>
+                  <tr>
+                    <td class="nowrap">{{ s.created_at | date: 'dd/MM/yyyy HH:mm' }}</td>
+                    <td>{{ s.kind === 'CIERRE' ? 'Cierre de caja' : 'Estado de cuenta' }}{{ s.customer ? ' · ' + s.customer.full_name : '' }}</td>
+                    <td class="small">{{ s.recipients.join(', ') }}</td>
+                    <td>
+                      <p-tag [value]="s.status === 'ENVIADO' ? 'Enviado' : 'Error'" [severity]="s.status === 'ENVIADO' ? 'success' : 'danger'" [pTooltip]="s.status === 'ERROR' ? s.detail : ''" />
+                    </td>
+                  </tr>
+                </ng-template>
+              </p-table>
+            </div>
+          }
           <div class="form-actions field--full">
             <p-button type="submit" label="Guardar" icon="pi pi-check" [loading]="saving()" />
           </div>
