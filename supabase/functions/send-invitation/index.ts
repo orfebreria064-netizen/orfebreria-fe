@@ -15,6 +15,19 @@ const ERRORS: Record<string, string> = {
   'Email rate limit exceeded': 'Se alcanzó el límite de correos por hora.',
   'email rate limit exceeded': 'Se alcanzó el límite de correos por hora.',
 };
+/**
+ * Enlace hacia la app (/activar-cuenta?token_hash=…&type=…) en vez del enlace directo de Supabase:
+ * el token se valida solo cuando la persona pulsa «Continuar», así los revisores automáticos de
+ * enlaces (antivirus del correo, vista previa de WhatsApp) no gastan el token de un solo uso.
+ */
+function appLink(redirectTo: string | undefined, props: { hashed_token: string; action_link: string }, type: 'invite' | 'recovery') {
+  if (!redirectTo) return props.action_link;
+  const url = new URL(redirectTo);
+  url.searchParams.set('token_hash', props.hashed_token);
+  url.searchParams.set('type', type);
+  return url.toString();
+}
+
 const translate = (message: string) =>
   ERRORS[message] ?? (/spam/i.test(message) ? 'El servidor de correo rechazó el mensaje (filtro de spam).' : message);
 
@@ -56,7 +69,7 @@ Deno.serve(async (req) => {
         options: { redirectTo },
       });
       if (linkError) return json({ error: translate(linkError.message) }, 400);
-      return json({ ok: true, emailed: false, email: u.user.email, link: link.properties.action_link, kind: 'recovery' });
+      return json({ ok: true, emailed: false, email: u.user.email, link: appLink(redirectTo, link.properties, 'recovery'), kind: 'recovery' });
     }
 
     // ---------------------------------------------------------------- Invitación
@@ -88,7 +101,7 @@ Deno.serve(async (req) => {
       await admin.from('invitations').update({ status: 'REVOKED' }).eq('id', inv.id).eq('status', 'PENDING');
       return json({ error: translate(linkError.message) }, 400);
     }
-    return json({ ok: true, emailed: false, email: inv.email, link: link.properties.action_link, kind: 'invite', email_error: emailError });
+    return json({ ok: true, emailed: false, email: inv.email, link: appLink(redirectTo, link.properties, 'invite'), kind: 'invite', email_error: emailError });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : 'Error inesperado.' }, 500);
   }

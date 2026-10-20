@@ -96,6 +96,18 @@ export class AuthService {
     if (error) throw new AppError(AUTH_MESSAGES[error.message] ?? error.message);
   }
 
+  /**
+   * Valida el token de un enlace de invitación o recuperación (formato ?token_hash=…&type=…).
+   * Se llama solo cuando la persona pulsa «Continuar»: así los revisores automáticos de enlaces
+   * (antivirus del correo, vista previa de WhatsApp) no gastan el token de un solo uso.
+   */
+  async verifyEmailLink(tokenHash: string, type: 'invite' | 'recovery'): Promise<void> {
+    const { data, error } = await this.supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+    if (error) throw new AppError('El enlace venció o ya fue utilizado. Solicite uno nuevo.');
+    this.session.set(data.session);
+    await this.loadProfile();
+  }
+
   /** Define la contraseña del usuario con sesión (invitación o recuperación). */
   async updatePassword(password: string): Promise<void> {
     if (await isPwnedPassword(password)) {

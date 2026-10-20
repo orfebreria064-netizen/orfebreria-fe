@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { PasswordModule } from 'primeng/password';
 import { strongPasswordValidator } from '../../../shared/utils/validators';
@@ -14,8 +14,10 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
 
 /**
  * Destino de los enlaces de invitación y de recuperación de contraseña.
- * supabase-js toma la sesión del enlace (detectSessionInUrl) antes del arranque;
- * aquí el usuario define su contraseña y entra a la aplicación.
+ *  - Formato actual (?token_hash=…&type=…): el token se valida solo al pulsar «Continuar», para que
+ *    los revisores automáticos de enlaces (antivirus del correo, vista previa de WhatsApp) no lo gasten.
+ *  - Formato anterior (#access_token=…): supabase-js toma la sesión del enlace (detectSessionInUrl).
+ * Luego el usuario define su contraseña y entra a la aplicación.
  */
 @Component({
   selector: 'app-set-password',
@@ -30,7 +32,18 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
         </div>
       </div>
 
-      @if (!auth.isAuthenticated()) {
+      @if (pendingToken()) {
+        <p class="muted">
+          {{ pendingToken()!.type === 'invite' ? 'Está a un paso de activar su cuenta.' : 'Va a crear una nueva contraseña para su cuenta.' }}
+          Pulse «Continuar» para seguir.
+        </p>
+        @if (error()) {
+          <p-message severity="error" [text]="error()!" />
+          <p class="auth-footer"><a routerLink="/login">Ir a iniciar sesión</a></p>
+        } @else {
+          <p-button label="Continuar" icon="pi pi-arrow-right" iconPos="right" [loading]="loading()" [fluid]="true" (onClick)="continueWithLink()" />
+        }
+      } @else if (!auth.isAuthenticated()) {
         <p-message severity="warn" text="El enlace venció o ya fue utilizado. Solicite uno nuevo desde «¿Olvidó su contraseña?»." />
         <p class="auth-footer"><a routerLink="/login">Ir a iniciar sesión</a></p>
       } @else {
@@ -74,6 +87,33 @@ export class SetPassword {
 
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
+
+  /** Token del enlace aún sin validar (se valida al pulsar «Continuar»). */
+  protected readonly pendingToken = signal<{ tokenHash: string; type: 'invite' | 'recovery' } | null>(
+    (() => {
+      const q = inject(ActivatedRoute).snapshot.queryParamMap;
+      const tokenHash = q.get('token_hash');
+      const type = q.get('type');
+      return tokenHash && (type === 'invite' || type === 'recovery') ? { tokenHash, type } : null;
+    })(),
+  );
+
+  protected async continueWithLink(): Promise<void> {
+    const token = this.pendingToken();
+    if (!token) return;
+    this.loading.set(true);
+    this.error.set(null);
+    try {
+      await this.auth.verifyEmailLink(token.tokenHash, token.type);
+      this.pendingToken.set(null);
+      // Quita el token de la barra de direcciones
+      await this.router.navigate([], { queryParams: {}, replaceUrl: true });
+    } catch (err) {
+      this.error.set(err instanceof Error ? err.message : 'El enlace venció o ya fue utilizado.');
+    } finally {
+      this.loading.set(false);
+    }
+  }
 
   protected readonly form = inject(FormBuilder).nonNullable.group(
     {
