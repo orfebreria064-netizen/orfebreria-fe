@@ -12,6 +12,8 @@ import { NotifyService } from '../../../../core/services/notify.service';
 import { Plan, PlatformOrganization, SUBSCRIPTION_STATUS_OPTIONS, SubscriptionStatus } from '../../../../core/models/subscription.model';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { fromIsoDate } from '../../../../shared/utils/db';
+import { AccessLinkDialog } from '../../../../shared/components/access-link-dialog/access-link-dialog';
+import { AccessLinkResult } from '../../../../core/services/invitations.service';
 import { PlatformService } from '../../services/platform.service';
 
 /**
@@ -31,6 +33,7 @@ import { PlatformService } from '../../services/platform.service';
     TextareaModule,
     MessageModule,
     FieldError,
+    AccessLinkDialog,
   ],
   template: `
     <p-dialog [header]="'Suscripción · ' + (org()?.name ?? '')" [(visible)]="visible" [modal]="true" [style]="{ width: '560px' }" [draggable]="false">
@@ -90,6 +93,7 @@ import { PlatformService } from '../../services/platform.service';
         </div>
       </form>
     </p-dialog>
+    <app-access-link-dialog [(visible)]="linkVisible" [result]="link()" />
   `,
   styles: `
     .divider {
@@ -104,6 +108,8 @@ export class SubscriptionDialog {
   private readonly notify = inject(NotifyService);
 
   readonly visible = model(false);
+  protected readonly link = signal<AccessLinkResult | null>(null);
+  protected linkVisible = false;
   readonly org = input<PlatformOrganization | null>(null);
   readonly plans = input<Plan[]>([]);
   readonly saved = output<void>();
@@ -185,8 +191,13 @@ export class SubscriptionDialog {
     const { full_name, email } = this.invite.getRawValue();
     this.inviting.set(true);
     try {
-      await this.service.inviteAdmin(o.org_id, email.trim(), full_name.trim());
-      this.notify.success(`Invitación enviada a ${email.trim()}.`);
+      const result = await this.service.inviteAdmin(o.org_id, email.trim(), full_name.trim());
+      if (result.emailed) {
+        this.notify.success(`Invitación enviada a ${email.trim()}.`);
+      } else {
+        this.link.set(result);
+        this.linkVisible = true;
+      }
       this.invite.reset({ full_name: '', email: '' });
       this.saved.emit();
     } catch (err) {

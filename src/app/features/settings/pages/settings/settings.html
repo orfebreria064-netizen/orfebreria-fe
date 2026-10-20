@@ -187,7 +187,7 @@
 
         <p-table [value]="users()" [scrollable]="true" [tableStyle]="{ 'min-width': '720px' }">
           <ng-template #header>
-            <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Registro</th></tr>
+            <tr><th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th>Registro</th><th></th></tr>
           </ng-template>
           <ng-template #body let-u>
             <tr>
@@ -216,9 +216,15 @@
                 </div>
               </td>
               <td class="nowrap">{{ u.created_at | date: 'dd/MM/yyyy' }}</td>
+              <td class="text-right">
+                @if (!isMe(u) && u.active) {
+                  <p-button icon="pi pi-link" [text]="true" size="small" severity="secondary" ariaLabel="Enlace de acceso" pTooltip="Enlace de acceso (nueva contraseña) para enviar por WhatsApp" (onClick)="generateAccessLink(u)" />
+                }
+              </td>
             </tr>
           </ng-template>
         </p-table>
+        <app-access-link-dialog [(visible)]="accessLinkVisible" [result]="accessLink()" [appName]="lookups.settings()?.company_name ?? 'Aurum'" />
       </p-tabpanel>
 
       <!-- Etapas -->

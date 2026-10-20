@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { SupabaseService } from '../../../core/services/supabase.service';
-import { InvitationsService } from '../../../core/services/invitations.service';
+import { AccessLinkResult, InvitationsService } from '../../../core/services/invitations.service';
 import {
   AccessRequest,
   PaymentMethodSaas,
@@ -68,24 +68,23 @@ export class PlatformService {
     unwrap(await this.db.from('plans').update(data).eq('code', code));
   }
 
-  /** Crea la empresa e invita al dueño. Devuelve el correo invitado. */
-  async approve(requestId: string, planCode: string, trialDays: number): Promise<string> {
+  /** Crea la empresa e invita al dueño. Si el correo no sale, el resultado trae el enlace de activación. */
+  async approve(requestId: string, planCode: string, trialDays: number): Promise<AccessLinkResult> {
     const res = unwrap(
       await this.db.rpc('platform_approve_request', { p_id: requestId, p_plan_code: planCode, p_trial_days: trialDays }),
     ) as { invitation_id: string; email: string };
-    await this.invitations.send(res.invitation_id);
-    return res.email;
+    return this.invitations.send(res.invitation_id);
   }
 
   async reject(requestId: string, reason: string): Promise<void> {
     unwrap(await this.db.rpc('platform_reject_request', { p_id: requestId, p_reason: reason }));
   }
 
-  async inviteAdmin(orgId: string, email: string, fullName: string): Promise<void> {
+  async inviteAdmin(orgId: string, email: string, fullName: string): Promise<AccessLinkResult> {
     const id = unwrap(
       await this.db.rpc('platform_invite_admin', { p_org_id: orgId, p_email: email, p_full_name: fullName }),
     ) as string;
-    await this.invitations.send(id);
+    return this.invitations.send(id);
   }
 
   /** Devuelve la nueva fecha de vencimiento. */

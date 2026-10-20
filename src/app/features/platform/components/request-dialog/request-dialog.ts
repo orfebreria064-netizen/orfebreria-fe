@@ -9,12 +9,14 @@ import { TextareaModule } from 'primeng/textarea';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { AccessRequest, Plan } from '../../../../core/models/subscription.model';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
+import { AccessLinkDialog } from '../../../../shared/components/access-link-dialog/access-link-dialog';
+import { AccessLinkResult } from '../../../../core/services/invitations.service';
 import { PlatformService } from '../../services/platform.service';
 
 /** Aprobar (crea la empresa con prueba e invita al dueño) o rechazar una solicitud de acceso. */
 @Component({
   selector: 'app-request-dialog',
-  imports: [DatePipe, ReactiveFormsModule, ButtonModule, DialogModule, InputNumberModule, SelectModule, TextareaModule, FieldError],
+  imports: [DatePipe, ReactiveFormsModule, ButtonModule, DialogModule, InputNumberModule, SelectModule, TextareaModule, FieldError, AccessLinkDialog],
   template: `
     <p-dialog
       [header]="mode() === 'approve' ? 'Aprobar solicitud' : 'Rechazar solicitud'"
@@ -67,6 +69,7 @@ import { PlatformService } from '../../services/platform.service';
         }
       }
     </p-dialog>
+    <app-access-link-dialog [(visible)]="linkVisible" [result]="link()" />
   `,
   styles: `
     .req {
@@ -97,6 +100,8 @@ export class RequestDialog {
   private readonly notify = inject(NotifyService);
 
   readonly visible = model(false);
+  protected readonly link = signal<AccessLinkResult | null>(null);
+  protected linkVisible = false;
   readonly mode = input<'approve' | 'reject'>('approve');
   readonly request = input<AccessRequest | null>(null);
   readonly plans = input<Plan[]>([]);
@@ -132,9 +137,15 @@ export class RequestDialog {
     const { plan_code, trial_days } = this.approveForm.getRawValue();
     this.saving.set(true);
     try {
-      const email = await this.service.approve(r.id, plan_code, trial_days);
-      this.notify.success(`Empresa creada. Invitación enviada a ${email}.`);
+      const result = await this.service.approve(r.id, plan_code, trial_days);
       this.visible.set(false);
+      if (result.emailed) {
+        this.notify.success(`Empresa creada. Invitación enviada a ${result.email}.`);
+      } else {
+        this.notify.success('Empresa creada. Comparta el enlace de activación con el administrador.');
+        this.link.set(result);
+        this.linkVisible = true;
+      }
     } catch (err) {
       // Si falló solo el correo, la empresa ya existe: se reinvita desde «Suscripción».
       this.notify.error(err, 'No se completó la aprobación.');

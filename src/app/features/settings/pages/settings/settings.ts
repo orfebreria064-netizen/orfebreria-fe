@@ -13,6 +13,8 @@ import { ToggleSwitchModule } from 'primeng/toggleswitch';
 import { CheckboxModule } from 'primeng/checkbox';
 import { TagModule } from 'primeng/tag';
 import { TooltipModule } from 'primeng/tooltip';
+import { AccessLinkDialog } from '../../../../shared/components/access-link-dialog/access-link-dialog';
+import { AccessLinkResult } from '../../../../core/services/invitations.service';
 import { MessageModule } from 'primeng/message';
 import { DialogModule } from 'primeng/dialog';
 import { ProgressBarModule } from 'primeng/progressbar';
@@ -60,6 +62,7 @@ import { SettingsService } from '../../services/settings.service';
     CheckboxModule,
     TagModule,
     TooltipModule,
+    AccessLinkDialog,
     MessageModule,
     PageHeader,
     FieldError,
@@ -69,7 +72,7 @@ import { SettingsService } from '../../services/settings.service';
 })
 export class Settings implements OnInit {
   private readonly service = inject(SettingsService);
-  private readonly lookups = inject(LookupService);
+  protected readonly lookups = inject(LookupService);
   private readonly notify = inject(NotifyService);
   private readonly invitationsService = inject(InvitationsService);
   protected readonly auth = inject(AuthService);
@@ -142,6 +145,9 @@ export class Settings implements OnInit {
   });
 
   protected readonly statementSends = signal<StatementSend[]>([]);
+  /** Enlace para compartir por WhatsApp cuando el correo no sale (o a pedido del ADMIN). */
+  protected readonly accessLink = signal<AccessLinkResult | null>(null);
+  protected accessLinkVisible = false;
   /** De 5 p. m. a 11 p. m. (hora de Lima). */
   protected readonly statementHours = [17, 18, 19, 20, 21, 22, 23].map((h) => ({ value: h, label: `${h - 12}:00 p. m.` }));
 
@@ -275,9 +281,9 @@ export class Settings implements OnInit {
     const { full_name, email, role } = this.inviteForm.getRawValue();
     this.inviting.set(true);
     try {
-      await this.invitationsService.invite(email.trim(), full_name.trim(), role);
+      const result = await this.invitationsService.invite(email.trim(), full_name.trim(), role);
       this.inviteVisible = false;
-      this.notify.success(`Se envió la invitación a ${email.trim()}.`);
+      this.showSendResult(result, `Se envió la invitación a ${email.trim()}.`);
     } catch (err) {
       this.notify.error(err, 'No se pudo invitar al usuario.');
     } finally {
@@ -288,12 +294,31 @@ export class Settings implements OnInit {
 
   async resendInvitation(inv: Invitation): Promise<void> {
     try {
-      await this.invitationsService.send(inv.id);
-      this.notify.success(`Invitación reenviada a ${inv.email}.`);
+      const result = await this.invitationsService.send(inv.id);
+      this.showSendResult(result, `Invitación reenviada a ${inv.email}.`);
     } catch (err) {
       this.notify.error(err, 'No se pudo reenviar la invitación.');
     }
     await this.reloadUsers();
+  }
+
+  /** Enlace de acceso (nueva contraseña) para compartirlo por WhatsApp. */
+  async generateAccessLink(u: Profile): Promise<void> {
+    try {
+      this.accessLink.set(await this.invitationsService.accessLink(u.id));
+      this.accessLinkVisible = true;
+    } catch (err) {
+      this.notify.error(err, 'No se pudo generar el enlace de acceso.');
+    }
+  }
+
+  private showSendResult(result: AccessLinkResult, emailedMessage: string): void {
+    if (result.emailed) {
+      this.notify.success(emailedMessage);
+      return;
+    }
+    this.accessLink.set(result);
+    this.accessLinkVisible = true;
   }
 
   async revokeInvitation(inv: Invitation): Promise<void> {
