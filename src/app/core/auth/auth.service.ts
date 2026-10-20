@@ -7,6 +7,7 @@ import { Profile } from '../models/profile.model';
 import { AppRole } from '../models/domain';
 import { MySubscription } from '../models/subscription.model';
 import { AppError, unwrap } from '../../shared/utils/db';
+import { isPwnedPassword } from '../../shared/utils/pwned';
 
 const AUTH_MESSAGES: Record<string, string> = {
   'Invalid login credentials': 'Correo o contraseña incorrectos.',
@@ -95,6 +96,9 @@ export class AuthService {
 
   /** Define la contraseña del usuario con sesión (invitación o recuperación). */
   async updatePassword(password: string): Promise<void> {
+    if (await isPwnedPassword(password)) {
+      throw new AppError('Esta contraseña aparece en filtraciones de datos conocidas. Elija otra.');
+    }
     const { error } = await this.supabase.auth.updateUser({ password });
     if (error) throw new AppError(AUTH_MESSAGES[error.message] ?? error.message);
   }

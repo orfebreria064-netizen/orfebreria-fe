@@ -3,6 +3,7 @@ import { AbstractControl, FormBuilder, ReactiveFormsModule, ValidationErrors, Va
 import { Router, RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { PasswordModule } from 'primeng/password';
+import { strongPasswordValidator } from '../../../shared/utils/validators';
 import { MessageModule } from 'primeng/message';
 import { AuthService } from '../../../core/auth/auth.service';
 import { FieldError } from '../../../shared/components/field-error/field-error';
@@ -47,7 +48,7 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
               formControlName="password"
               [toggleMask]="true"
               [fluid]="true"
-              promptLabel="Mínimo 8 caracteres"
+              promptLabel="Mínimo 8 caracteres, con letras y números"
               weakLabel="Débil"
               mediumLabel="Media"
               strongLabel="Fuerte"
@@ -76,7 +77,7 @@ export class SetPassword {
 
   protected readonly form = inject(FormBuilder).nonNullable.group(
     {
-      password: ['', [Validators.required, Validators.minLength(8)]],
+      password: ['', [Validators.required, Validators.minLength(8), strongPasswordValidator]],
       confirm: ['', [Validators.required]],
     },
     { validators: passwordsMatch },

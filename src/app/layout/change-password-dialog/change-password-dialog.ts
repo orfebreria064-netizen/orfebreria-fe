@@ -6,6 +6,7 @@ import { PasswordModule } from 'primeng/password';
 import { AuthService } from '../../core/auth/auth.service';
 import { NotifyService } from '../../core/services/notify.service';
 import { FieldError } from '../../shared/components/field-error/field-error';
+import { strongPasswordValidator } from '../../shared/utils/validators';
 
 function passwordsMatch(group: AbstractControl): ValidationErrors | null {
   return group.get('next')?.value === group.get('confirm')?.value ? null : { mismatch: 'Las contraseñas no coinciden.' };
@@ -30,7 +31,7 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
             formControlName="next"
             [toggleMask]="true"
             [fluid]="true"
-            promptLabel="Mínimo 8 caracteres"
+            promptLabel="Mínimo 8 caracteres, con letras y números"
             weakLabel="Débil"
             mediumLabel="Media"
             strongLabel="Fuerte"
@@ -62,7 +63,7 @@ export class ChangePasswordDialog {
   protected readonly form = inject(FormBuilder).nonNullable.group(
     {
       current: ['', [Validators.required]],
-      next: ['', [Validators.required, Validators.minLength(8)]],
+      next: ['', [Validators.required, Validators.minLength(8), strongPasswordValidator]],
       confirm: ['', [Validators.required]],
     },
     { validators: passwordsMatch },

@@ -20,6 +20,15 @@ export function documentValidator(typeControlName: string): ValidatorFn {
   };
 }
 
+/** Contraseña robusta: además del mínimo de 8 caracteres, al menos una letra y un número. */
+export const strongPasswordValidator: ValidatorFn = (control) => {
+  const value = String(control.value ?? '');
+  if (!value) return null;
+  return /[A-Za-zÁÉÍÓÚÑáéíóúñ]/.test(value) && /\d/.test(value)
+    ? null
+    : { weakPassword: 'Use al menos una letra y un número.' };
+};
+
 /** Teléfono peruano: celular de 9 dígitos (9xxxxxxxx) o fijo de 7-9 dígitos; admite +51 y espacios. */
 export const phoneValidator: ValidatorFn = (control) => {
   const raw = String(control.value ?? '').trim();
