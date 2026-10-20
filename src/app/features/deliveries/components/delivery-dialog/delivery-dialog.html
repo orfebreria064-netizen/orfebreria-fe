@@ -18,13 +18,13 @@
       <div class="field--full">
         <p class="small" style="margin: 0 0 0.5rem"><strong>{{ o.number }}</strong> · {{ o.title }}</p>
         <div class="amounts">
-          <div><small>Total</small><strong>{{ o.total | money }}</strong></div>
-          <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money }}</strong></div>
-          <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></div>
+          <div><small>Total</small><strong>{{ o.total | money: o.currency }}</strong></div>
+          <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money: o.currency }}</strong></div>
+          <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</strong></div>
         </div>
       </div>
       @if (o.balance > 0) {
-        <p-message class="field--full" severity="warn" [text]="'El pedido tiene un saldo pendiente de ' + (o.balance | money) + '. Puede entregarse, pero quedará registrado.'" />
+        <p-message class="field--full" severity="warn" [text]="'El pedido tiene un saldo pendiente de ' + (o.balance | money: o.currency) + '. Puede entregarse, pero quedará registrado.'" />
       }
       @if (!o.qc_approved && isDelivered()) {
         <p-message class="field--full" severity="error" text="El control de calidad del pedido no está aprobado: complete la producción antes de registrar la entrega." />

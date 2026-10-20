@@ -28,6 +28,7 @@ import { daysUntil } from '../../../../shared/utils/format';
 import { OrderRow } from '../../../orders/models/order.model';
 import { Payment } from '../../models/payment.model';
 import { PaymentsService } from '../../services/payments.service';
+import { ReceiptPdfService } from '../../services/receipt-pdf.service';
 import { PaymentDialog } from '../../components/payment-dialog/payment-dialog';
 
 /** Cobranza: pagos recibidos y cuentas por cobrar. */
@@ -56,6 +57,7 @@ import { PaymentDialog } from '../../components/payment-dialog/payment-dialog';
 })
 export class PaymentList implements OnInit {
   private readonly service = inject(PaymentsService);
+  private readonly receipts = inject(ReceiptPdfService);
   private readonly notify = inject(NotifyService);
   private readonly router = inject(Router);
 
@@ -73,11 +75,12 @@ export class PaymentList implements OnInit {
   protected method: PaymentMethod | null = null;
   protected includeVoided = false;
 
+  // Totales por moneda: S/ siempre; US$ solo si hay movimientos en dólares
   protected readonly collected = computed(() =>
-    formatMoney(this.payments().filter((p) => !p.voided).reduce((acc, p) => acc + Number(p.amount), 0)),
+    totalsByCurrency(this.payments().filter((p) => !p.voided).map((p) => ({ amount: p.amount, currency: p.currency }))),
   );
   protected readonly receivableTotal = computed(() =>
-    formatMoney(this.receivables().reduce((acc, o) => acc + Number(o.balance), 0)),
+    totalsByCurrency(this.receivables().map((o) => ({ amount: o.balance, currency: o.currency }))),
   );
   protected readonly byMethod = computed(() => {
     const totals = new Map<PaymentMethod, number>();
@@ -124,4 +127,20 @@ export class PaymentList implements OnInit {
   protected openOrder(id: string): void {
     void this.router.navigate(['/orders', id]);
   }
+
+  protected async printReceipt(p: Payment): Promise<void> {
+    try {
+      const hadNumber = !!p.receipt_number;
+      await this.receipts.income(p);
+      if (!hadNumber) await this.load();
+    } catch (err) {
+      this.notify.error(err, 'No se pudo generar el recibo.');
+    }
+  }
+}
+
+function totalsByCurrency(rows: { amount: number; currency: string | null }[]): string {
+  const pen = rows.filter((r) => r.currency !== 'USD').reduce((acc, r) => acc + Number(r.amount), 0);
+  const usd = rows.filter((r) => r.currency === 'USD').reduce((acc, r) => acc + Number(r.amount), 0);
+  return usd ? `${formatMoney(pen)} · ${formatMoney(usd, 'USD')}` : formatMoney(pen);
 }

@@ -59,12 +59,16 @@
           <p-inputnumber inputId="tax_rate" formControlName="tax_rate" [min]="0" [max]="100" suffix=" %" [fluid]="true" />
           <app-field-error [control]="form.controls.tax_rate" />
         </div>
+        <div class="field">
+          <label for="currency">Moneda <span class="req">*</span></label>
+          <p-select inputId="currency" [options]="currencies" formControlName="currency" optionLabel="label" optionValue="value" />
+        </div>
       </div>
     </section>
 
     <section class="card">
       <h2 class="card__title">Detalle</h2>
-      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" />
+      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" [currency]="currency()" />
     </section>
 
     <section class="card">

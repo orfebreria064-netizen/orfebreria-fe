@@ -10,15 +10,15 @@
 
     @if (order(); as o) {
       <div class="amounts field--full">
-        <div><small>Total pedido</small><strong>{{ o.total | money }}</strong></div>
-        <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money }}</strong></div>
-        <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money }}</strong></div>
+        <div><small>Total pedido</small><strong>{{ o.total | money: o.currency }}</strong></div>
+        <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money: o.currency }}</strong></div>
+        <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</strong></div>
       </div>
     }
 
     <div class="field">
       <label for="pay-amount">Monto <span class="req">*</span></label>
-      <p-inputnumber inputId="pay-amount" formControlName="amount" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+      <p-inputnumber inputId="pay-amount" formControlName="amount" mode="currency" [currency]="currency()" locale="es-PE" [min]="0" [fluid]="true" />
       <app-field-error [control]="form.controls.amount" />
     </div>
     <div class="field">
@@ -31,8 +31,12 @@
       <p-select inputId="pay-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
     </div>
     <div class="field">
-      <label for="pay-ref">Referencia / N.° operación</label>
+      <label for="pay-ref">{{ form.controls.method.value === 'CHEQUE' ? 'N.° de cheque' : 'Referencia / N.° operación' }}</label>
       <input pInputText id="pay-ref" formControlName="reference" />
+    </div>
+    <div class="field field--full">
+      <label for="pay-from">Entregado por</label>
+      <input pInputText id="pay-from" formControlName="received_from" placeholder="Déjelo vacío si paga el mismo cliente" />
     </div>
     <div class="field field--full row">
       <p-checkbox inputId="pay-advance" formControlName="is_advance" [binary]="true" />

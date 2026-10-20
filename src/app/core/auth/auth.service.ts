@@ -28,7 +28,9 @@ export class AuthService {
   readonly isPlatformAdmin = signal(false);
 
   readonly isAuthenticated = computed(() => this.session() !== null);
-  readonly isActive = computed(() => this.profile()?.active === true);
+  /** Superadministrador sin empresa: solo administra la plataforma. */
+  readonly isPlatformOnly = computed(() => this.isPlatformAdmin() && this.profile() === null);
+  readonly isActive = computed(() => this.isPlatformOnly() || this.profile()?.active === true);
   readonly role = computed<AppRole | null>(() => (this.profile()?.active ? this.profile()!.role : null));
   readonly userName = computed(() => this.profile()?.full_name ?? this.session()?.user.email ?? '');
   /** Suspendida o cancelada por la plataforma: sin acceso a los datos. */
@@ -95,6 +97,15 @@ export class AuthService {
   async updatePassword(password: string): Promise<void> {
     const { error } = await this.supabase.auth.updateUser({ password });
     if (error) throw new AppError(AUTH_MESSAGES[error.message] ?? error.message);
+  }
+
+  /** Cambio de contraseña con sesión iniciada: se verifica la contraseña actual antes de reemplazarla. */
+  async changePassword(current: string, next: string): Promise<void> {
+    const email = this.session()?.user.email;
+    if (!email) throw new AppError('Su sesión expiró. Vuelva a ingresar.');
+    const { error: checkError } = await this.supabase.auth.signInWithPassword({ email, password: current });
+    if (checkError) throw new AppError('La contraseña actual no es correcta.');
+    await this.updatePassword(next);
   }
 
   async signOut(): Promise<void> {

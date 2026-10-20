@@ -9,6 +9,7 @@ export type ItemFormGroup = FormGroup<{
   material_name: FormControl<string | null>;
   quantity: FormControl<number | null>;
   unit: FormControl<string>;
+  weight: FormControl<number | null>;
   unit_price: FormControl<number | null>;
   discount: FormControl<number | null>;
 }>;
@@ -41,6 +42,7 @@ export function createItemGroup(item?: Partial<QuotationItem>): ItemFormGroup {
       material_name: new FormControl(item?.material_name ?? null),
       quantity: new FormControl(item?.quantity != null ? Number(item.quantity) : 1, [Validators.required, positiveValidator]),
       unit: new FormControl(item?.unit ?? 'und', { nonNullable: true }),
+      weight: new FormControl(item?.weight != null ? Number(item.weight) : null, [Validators.min(0)]),
       unit_price: new FormControl(item?.unit_price != null ? Number(item.unit_price) : null, [
         Validators.required,
         Validators.min(0),
@@ -60,6 +62,7 @@ export function itemsFromArray(array: FormArray<ItemFormGroup>): QuotationItem[]
     material_name: v.material_name,
     quantity: Number(v.quantity),
     unit: v.unit,
+    weight: v.weight ? Number(v.weight) : null,
     unit_price: Number(v.unit_price ?? 0),
     discount: Number(v.discount ?? 0),
   }));

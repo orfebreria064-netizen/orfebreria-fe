@@ -2,14 +2,15 @@ import { Injectable, inject } from '@angular/core';
 import { SupabaseService } from '../../../core/services/supabase.service';
 import { OrderStatus, Priority } from '../../../core/models/domain';
 import { todayIso, unwrap } from '../../../shared/utils/db';
-import { OrderDetail, OrderHeaderInput, OrderHistoryEntry, OrderItem, OrderRow } from '../models/order.model';
+import { OrderDetail, OrderHeaderInput, OrderHistoryEntry, OrderItem, OrderRow, ProductionOrderInput } from '../models/order.model';
 
 export const ORDER_ROW_SELECT =
   '*, customer:customers(id, full_name), service_type:service_types(name), assignee:profiles!orders_assigned_to_fkey(id, full_name)';
 const ORDER_DETAIL_SELECT =
   '*, items:order_items(*), service_type:service_types(name), assignee:profiles!orders_assigned_to_fkey(id, full_name), ' +
   'quotation:quotations!orders_quotation_id_fkey(id, number), ' +
-  'customer:customers(id, full_name, document_type, document_number, phone, whatsapp, email, address)';
+  'customer:customers(id, full_name, document_type, document_number, phone, whatsapp, email, address), ' +
+  'jeweler:jewelers(id, full_name, document_number, phone)';
 
 export interface OrderFilters {
   statuses?: OrderStatus[];
@@ -89,5 +90,26 @@ export class OrdersService {
     return unwrap(
       await this.db.from('order_history').select('*').eq('order_id', orderId).order('created_at', { ascending: false }),
     ) as OrderHistoryEntry[];
+  }
+
+  /** Proforma (PRO) u orden de producción (OP): la primera emisión asigna el número; luego se reutiliza. */
+  async issueDocument(orderId: string, docType: 'PRO' | 'OP'): Promise<string> {
+    return unwrap(await this.db.rpc('issue_order_document', { p_order_id: orderId, p_doc_type: docType })) as string;
+  }
+
+  /** Datos del taller: joyero, material entregado, indicaciones y acabado (se envían todos los campos). */
+  async saveProduction(input: ProductionOrderInput): Promise<void> {
+    unwrap(
+      await this.db.rpc('save_order_production', {
+        p_order_id: input.order_id,
+        p_jeweler_id: input.jeweler_id,
+        p_material_delivered_at: input.material_delivered_at,
+        p_material_weight_out: input.material_weight_out,
+        p_production_instructions: input.production_instructions,
+        p_product_delivered_at: input.product_delivered_at,
+        p_weight_returned: input.weight_returned,
+        p_production_notes: input.production_notes,
+      }),
+    );
   }
 }

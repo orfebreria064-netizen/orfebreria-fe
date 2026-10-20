@@ -1,4 +1,4 @@
-import { QuotationStatus } from '../../../core/models/domain';
+import { Currency, QuotationStatus } from '../../../core/models/domain';
 
 export interface QuotationItem {
   id?: string;
@@ -9,6 +9,8 @@ export interface QuotationItem {
   material_name: string | null;
   quantity: number;
   unit: string;
+  /** Peso en gramos de la línea (columna Gr. de los documentos). */
+  weight: number | null;
   unit_price: number;
   discount: number;
   subtotal?: number;
@@ -34,6 +36,7 @@ export interface Quotation {
   tax_rate: number;
   tax_amount: number;
   total: number;
+  currency: Currency;
   approved_at: string | null;
   order_id: string | null;
   created_at: string;
@@ -76,4 +79,5 @@ export interface QuotationHeaderInput {
   notes: string | null;
   terms: string | null;
   tax_rate: number;
+  currency: Currency;
 }

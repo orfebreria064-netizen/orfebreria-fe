@@ -78,11 +78,13 @@
       <h2 class="card__title">
         Ítems y precios
         <span class="row small muted">
+          Moneda
+          <p-select [options]="currencies" formControlName="currency" optionLabel="label" optionValue="value" ariaLabel="Moneda" />
           IGV
           <p-inputnumber formControlName="tax_rate" [min]="0" [max]="100" suffix=" %" [inputStyle]="{ width: '5rem' }" />
         </span>
       </h2>
-      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" />
+      <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" [currency]="currency()" />
     </section>
 
     <section class="card">

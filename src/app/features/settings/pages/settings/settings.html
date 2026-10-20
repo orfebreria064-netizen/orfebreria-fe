@@ -1,13 +1,15 @@
-<app-page-header title="Configuración" subtitle="Empresa, usuarios, etapas de producción, tipos de servicio y plan" />
+<app-page-header title="Configuración" [subtitle]="showPlanTab ? 'Empresa, usuarios, etapas de producción, tipos de servicio y plan' : 'Empresa, usuarios, etapas de producción y tipos de servicio'" />
 
 <div class="card">
-  <p-tabs [value]="tab() ?? 'company'" [scrollable]="true">
+  <p-tabs [value]="initialTab()" [scrollable]="true">
     <p-tablist>
       <p-tab value="company"><i class="pi pi-building"></i> Empresa</p-tab>
       <p-tab value="users"><i class="pi pi-users"></i> Usuarios</p-tab>
       <p-tab value="stages"><i class="pi pi-sitemap"></i> Etapas de producción</p-tab>
       <p-tab value="services"><i class="pi pi-tags"></i> Tipos de servicio</p-tab>
-      <p-tab value="plan"><i class="pi pi-credit-card"></i> Mi plan</p-tab>
+      @if (showPlanTab) {
+        <p-tab value="plan"><i class="pi pi-credit-card"></i> Mi plan</p-tab>
+      }
     </p-tablist>
     <p-tabpanels>
       <!-- Empresa -->
@@ -51,6 +53,44 @@
             <label for="st-terms">Condiciones por defecto de las cotizaciones</label>
             <textarea pTextarea id="st-terms" formControlName="default_terms" rows="3" [autoResize]="true"></textarea>
           </div>
+
+          <h3 class="section-title field--full" style="margin-bottom: 0">Documentos impresos</h3>
+          <p class="muted small field--full" style="margin: 0">
+            Aparecen en la cotización, proforma, orden de producción y recibos.
+          </p>
+          <div class="field">
+            <span class="label">Logo</span>
+            <div class="logo-box">
+              @if (company.controls.logo.value) {
+                <img [src]="company.controls.logo.value" alt="Logo de la empresa" />
+              } @else {
+                <span class="muted small">Sin logo: se imprime el nombre comercial</span>
+              }
+            </div>
+            <div class="row">
+              <label class="p-button p-button-sm p-button-outlined p-button-secondary" for="st-logo" style="cursor: pointer">
+                <i class="pi pi-upload"></i>&nbsp;Subir imagen
+              </label>
+              <input id="st-logo" type="file" accept="image/png,image/jpeg" (change)="onLogoSelected($event)" hidden />
+              @if (company.controls.logo.value) {
+                <p-button label="Quitar" icon="pi pi-times" severity="secondary" [text]="true" size="small" (onClick)="removeLogo()" />
+              }
+            </div>
+          </div>
+          <div class="field field--span-2">
+            <label for="st-slogan">Eslogan (una línea por viñeta)</label>
+            <textarea pTextarea id="st-slogan" formControlName="slogan" rows="3" [autoResize]="true"
+              placeholder="Trabajos en Oro de 18 Kilates&#10;Platería con aplicaciones en piedras naturales&#10;Joyería fina con gemas preciosas y semipreciosas"></textarea>
+            <app-field-error [control]="company.controls.slogan" />
+          </div>
+          <div class="field">
+            <label for="st-mobile">Celular / RPC</label>
+            <input pInputText id="st-mobile" formControlName="mobile" placeholder="998 119 906 / RPC 987 938 366" />
+          </div>
+          <div class="field">
+            <label for="st-city">Ciudad (para los recibos)</label>
+            <input pInputText id="st-city" formControlName="city" placeholder="Lima" />
+          </div>
           <div class="form-actions field--full">
             <p-button type="submit" label="Guardar" icon="pi pi-check" [loading]="saving()" />
           </div>
@@ -71,7 +111,12 @@
           @if (seatsFull()) {
             <p-message severity="warn" styleClass="mb-3">
               Alcanzó el límite de su plan. Desactive un usuario o
-              <a routerLink="/settings" [queryParams]="{ tab: 'plan' }">mejore su plan</a> para invitar a más personas.
+              @if (showPlanTab) {
+                <a routerLink="/settings" [queryParams]="{ tab: 'plan' }">mejore su plan</a>
+              } @else {
+                mejore su plan
+              }
+              para invitar a más personas.
             </p-message>
           }
         }
@@ -189,6 +234,7 @@
       </p-tabpanel>
 
       <!-- Mi plan -->
+      @if (showPlanTab) {
       <p-tabpanel value="plan">
         @if (auth.subscription(); as sub) {
           <div class="plan-grid">
@@ -274,6 +320,7 @@
           </p-table>
         }
       </p-tabpanel>
+      }
     </p-tabpanels>
   </p-tabs>
 </div>

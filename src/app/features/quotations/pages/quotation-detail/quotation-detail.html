@@ -47,6 +47,8 @@
       <dl class="dl">
         <dt>Servicio</dt>
         <dd>{{ q.service_type?.name }}</dd>
+        <dt>Moneda</dt>
+        <dd>{{ q.currency === 'USD' ? 'Dólares (US$)' : 'Soles (S/)' }}</dd>
         <dt>Fecha / vence</dt>
         <dd>{{ q.issue_date | date: 'dd/MM/yyyy' }} → {{ q.expiry_date | date: 'dd/MM/yyyy' }}</dd>
         <dt>Material</dt>
@@ -66,7 +68,7 @@
     <p-table [value]="q.items" [scrollable]="true" [tableStyle]="{ 'min-width': '760px' }">
       <ng-template #header>
         <tr>
-          <th>#</th><th>Producto / servicio</th><th>Material</th><th class="text-right">Cantidad</th>
+          <th>#</th><th>Producto / servicio</th><th>Material</th><th class="text-right">Cantidad</th><th class="text-right">Gr.</th>
           <th class="text-right">Precio</th><th class="text-right">Descuento</th><th class="text-right">Subtotal</th>
         </tr>
       </ng-template>
@@ -81,9 +83,10 @@
           </td>
           <td>{{ it.material_name || '—' }}</td>
           <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
-          <td class="text-right mono nowrap">{{ it.unit_price | money }}</td>
-          <td class="text-right mono nowrap">{{ it.discount > 0 ? (it.discount | money) : '—' }}</td>
-          <td class="text-right mono nowrap strong">{{ it.subtotal | money }}</td>
+          <td class="text-right nowrap">{{ it.weight ? it.weight + ' g' : '—' }}</td>
+          <td class="text-right mono nowrap">{{ it.unit_price | money: q.currency }}</td>
+          <td class="text-right mono nowrap">{{ it.discount > 0 ? (it.discount | money: q.currency) : '—' }}</td>
+          <td class="text-right mono nowrap strong">{{ it.subtotal | money: q.currency }}</td>
         </tr>
       </ng-template>
     </p-table>
@@ -97,10 +100,10 @@
         }
       </div>
       <dl class="dl" style="max-width: 320px; margin-left: auto; width: 100%">
-        <dt>Subtotal</dt><dd class="text-right mono">{{ q.subtotal | money }}</dd>
-        <dt>Descuento</dt><dd class="text-right mono">- {{ q.discount_total | money }}</dd>
-        <dt>IGV ({{ q.tax_rate }}%)</dt><dd class="text-right mono">{{ q.tax_amount | money }}</dd>
-        <dt class="strong" style="color: var(--p-surface-900)">Total</dt><dd class="text-right mono" style="font-size: 1.15rem; font-weight: 700">{{ q.total | money }}</dd>
+        <dt>Subtotal</dt><dd class="text-right mono">{{ q.subtotal | money: q.currency }}</dd>
+        <dt>Descuento</dt><dd class="text-right mono">- {{ q.discount_total | money: q.currency }}</dd>
+        <dt>IGV ({{ q.tax_rate }}%)</dt><dd class="text-right mono">{{ q.tax_amount | money: q.currency }}</dd>
+        <dt class="strong" style="color: var(--p-surface-900)">Total</dt><dd class="text-right mono" style="font-size: 1.15rem; font-weight: 700">{{ q.total | money: q.currency }}</dd>
       </dl>
     </div>
   </section>

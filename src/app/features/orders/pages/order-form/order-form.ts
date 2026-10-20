@@ -8,7 +8,7 @@ import { SelectModule } from 'primeng/select';
 import { DatePickerModule } from 'primeng/datepicker';
 import { TextareaModule } from 'primeng/textarea';
 import { SkeletonModule } from 'primeng/skeleton';
-import { PRIORITY_OPTIONS, Priority } from '../../../../core/models/domain';
+import { CURRENCY_OPTIONS, Currency, PRIORITY_OPTIONS, Priority } from '../../../../core/models/domain';
 import { LookupService } from '../../../../core/services/lookup.service';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { BreadcrumbService } from '../../../../layout/breadcrumb.service';
@@ -59,6 +59,7 @@ export class OrderForm implements OnInit {
   protected readonly materials = signal<Material[]>([]);
   protected readonly number = signal<string | null>(null);
   protected readonly priorities = PRIORITY_OPTIONS;
+  protected readonly currencies = CURRENCY_OPTIONS;
 
   protected readonly items = new FormArray<ItemFormGroup>([]);
   protected readonly form = inject(FormBuilder).group(
@@ -77,6 +78,7 @@ export class OrderForm implements OnInit {
       start_date: [new Date() as Date | null, Validators.required],
       due_date: [null as Date | null],
       tax_rate: [18 as number | null, [Validators.required, Validators.min(0), Validators.max(100)]],
+      currency: ['PEN' as Currency, Validators.required],
     },
     { validators: dateRangeValidator('start_date', 'due_date', 'La entrega no puede ser anterior a la fecha de inicio.') },
   );
@@ -91,6 +93,7 @@ export class OrderForm implements OnInit {
         this.form.patchValue({
           customer_id: this.route.snapshot.queryParamMap.get('customer'),
           tax_rate: this.lookups.taxRate(),
+          currency: this.lookups.settings()?.currency === 'USD' ? 'USD' : 'PEN',
         });
         this.items.push(createItemGroup());
       }
@@ -125,6 +128,7 @@ export class OrderForm implements OnInit {
       start_date: fromIsoDate(o.start_date),
       due_date: fromIsoDate(o.due_date),
       tax_rate: Number(o.tax_rate),
+      currency: o.currency ?? 'PEN',
     });
     this.items.clear();
     o.items.forEach((item) => this.items.push(createItemGroup(item)));
@@ -132,6 +136,10 @@ export class OrderForm implements OnInit {
 
   protected taxRate(): number {
     return Number(this.form.controls.tax_rate.value ?? 0);
+  }
+
+  protected currency(): string {
+    return this.form.controls.currency.value ?? 'PEN';
   }
 
   async submit(): Promise<void> {
@@ -158,6 +166,7 @@ export class OrderForm implements OnInit {
       start_date: toIsoDate(v.start_date)!,
       due_date: toIsoDate(v.due_date),
       tax_rate: Number(v.tax_rate),
+      currency: v.currency ?? 'PEN',
     };
     try {
       const id = await this.service.save(this.id() ?? null, header, itemsFromArray(this.items));

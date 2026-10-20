@@ -1,6 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { LookupService } from '../../../core/services/lookup.service';
 import { formatMoney } from '../../../shared/pipes/money.pipe';
+import { loadLogo } from '../../../shared/pdf/pdf-kit';
 import { fromIsoDate } from '../../../shared/utils/db';
 import { ReportColumn, ReportSummaryItem } from '../models/report.model';
 
@@ -11,6 +12,8 @@ export interface ReportExport {
   columns: ReportColumn[];
   rows: Record<string, unknown>[];
   summary: ReportSummaryItem[];
+  /** Moneda de los montos (PEN por defecto). */
+  currency?: string;
   fileName: string;
 }
 
@@ -27,7 +30,7 @@ export function formatCell(row: Record<string, unknown>, col: ReportColumn): str
   if (v === null || v === undefined || v === '') return '—';
   switch (col.type) {
     case 'money':
-      return formatMoney(v as number);
+      return formatMoney(v as number, (row['currency'] as string | undefined) ?? 'PEN');
     case 'date': {
       const d = fromIsoDate(String(v).slice(0, 10));
       return d ? d.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '—';
@@ -68,18 +71,28 @@ export class ReportExportService {
     const ws = wb.addWorksheet(sheetName, { views: [{ state: 'frozen', ySplit: 6 }] });
     const lastCol = r.columns.length;
 
-    ws.mergeCells(1, 1, 1, lastCol);
-    ws.getCell(1, 1).value = company;
-    ws.getCell(1, 1).font = { bold: true, size: 14, color: { argb: 'FF1F2430' } };
-    ws.mergeCells(2, 1, 2, lastCol);
-    ws.getCell(2, 1).value = r.title;
-    ws.getCell(2, 1).font = { bold: true, size: 12, color: { argb: 'FFB08A3A' } };
-    ws.mergeCells(3, 1, 3, lastCol);
-    ws.getCell(3, 1).value = r.filters;
-    ws.getCell(3, 1).font = { italic: true, color: { argb: 'FF6E6E6E' } };
-    ws.mergeCells(4, 1, 4, lastCol);
-    ws.getCell(4, 1).value = `Generado: ${new Date().toLocaleString('es-PE')} · ${r.summary.map((s) => `${s.label}: ${s.value}`).join(' · ')}`;
-    ws.getCell(4, 1).font = { color: { argb: 'FF6E6E6E' } };
+    // Con logo: la imagen ocupa la columna A de las filas 1-4 y el texto empieza en la B
+    const logo = await loadLogo(this.lookups.settings()?.logo ?? null);
+    const firstCol = logo && lastCol > 1 ? 2 : 1;
+    if (logo && firstCol === 2) {
+      const imageId = wb.addImage({ base64: logo.data, extension: logo.format === 'PNG' ? 'png' : 'jpeg' });
+      const h = 72;
+      ws.addImage(imageId, { tl: { col: 0.15, row: 0.15 }, ext: { width: h * logo.ratio, height: h } });
+      [1, 2, 3, 4].forEach((n) => (ws.getRow(n).height = 20));
+    }
+
+    ws.mergeCells(1, firstCol, 1, lastCol);
+    ws.getCell(1, firstCol).value = company;
+    ws.getCell(1, firstCol).font = { bold: true, size: 14, color: { argb: 'FF1F2430' } };
+    ws.mergeCells(2, firstCol, 2, lastCol);
+    ws.getCell(2, firstCol).value = r.title;
+    ws.getCell(2, firstCol).font = { bold: true, size: 12, color: { argb: 'FFB08A3A' } };
+    ws.mergeCells(3, firstCol, 3, lastCol);
+    ws.getCell(3, firstCol).value = r.filters;
+    ws.getCell(3, firstCol).font = { italic: true, color: { argb: 'FF6E6E6E' } };
+    ws.mergeCells(4, firstCol, 4, lastCol);
+    ws.getCell(4, firstCol).value = `Generado: ${new Date().toLocaleString('es-PE')} · ${r.summary.map((s) => `${s.label}: ${s.value}`).join(' · ')}`;
+    ws.getCell(4, firstCol).font = { color: { argb: 'FF6E6E6E' } };
 
     const header = ws.getRow(6);
     r.columns.forEach((c, i) => {
@@ -96,7 +109,7 @@ export class ReportExportService {
       r.columns.forEach((c, i) => {
         const cell = xrow.getCell(i + 1);
         cell.value = this.excelValue(row, c);
-        if (c.type === 'money') cell.numFmt = '"S/" #,##0.00';
+        if (c.type === 'money') cell.numFmt = moneyFormat(r.currency);
         else if (c.type === 'qty') cell.numFmt = '#,##0.000';
         else if (c.type === 'date') cell.numFmt = 'dd/mm/yyyy';
       });
@@ -109,7 +122,7 @@ export class ReportExportService {
         if (!c.total) return;
         const cell = trow.getCell(i + 1);
         cell.value = columnTotal(r.rows, c);
-        cell.numFmt = c.type === 'money' ? '"S/" #,##0.00' : '#,##0.000';
+        cell.numFmt = c.type === 'money' ? moneyFormat(r.currency) : '#,##0.000';
       });
       trow.font = { bold: true };
       trow.eachCell((cell) => (cell.border = { top: { style: 'thin', color: { argb: 'FF1F2430' } } }));
@@ -131,13 +144,22 @@ export class ReportExportService {
 
     doc.setFillColor(...INK);
     doc.rect(0, 0, pageWidth, 22, 'F');
+    // Logo de la empresa a la izquierda de la banda
+    const logo = await loadLogo(s?.logo ?? null);
+    let textX = margin;
+    if (logo) {
+      const h = 18;
+      const w = Math.min(h * logo.ratio, 50);
+      doc.addImage(logo.data, logo.format, margin, 2, w, w / logo.ratio, undefined, 'FAST');
+      textX = margin + w + 4;
+    }
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
-    doc.text(s?.company_name ?? 'Orfebrería', margin, 10);
+    doc.text(s?.company_name ?? 'Orfebrería', textX, 10);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(8);
-    doc.text([s?.tax_id ? `RUC ${s.tax_id}` : null, s?.address, s?.phone].filter(Boolean).join('  ·  '), margin, 16);
+    doc.text([s?.tax_id ? `RUC ${s.tax_id}` : null, s?.address, s?.phone].filter(Boolean).join('  ·  '), textX, 16);
     doc.setTextColor(...GOLD);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
@@ -161,7 +183,7 @@ export class ReportExportService {
       head: [r.columns.map((c) => c.header)],
       body: r.rows.map((row) => r.columns.map((c) => formatCell(row, c))),
       foot: hasTotals
-        ? [r.columns.map((c, i) => (c.total ? (c.type === 'money' ? formatMoney(columnTotal(r.rows, c)) : qtyFormat.format(columnTotal(r.rows, c))) : i === 0 ? 'Total' : ''))]
+        ? [r.columns.map((c, i) => (c.total ? (c.type === 'money' ? formatMoney(columnTotal(r.rows, c), r.currency) : qtyFormat.format(columnTotal(r.rows, c))) : i === 0 ? 'Total' : ''))]
         : undefined,
       showFoot: 'lastPage',
       styles: { fontSize: 7.5, cellPadding: 1.6, textColor: INK },
@@ -222,4 +244,9 @@ export class ReportExportService {
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+}
+
+/** Formato numérico de Excel con el símbolo de la moneda. */
+function moneyFormat(currency: string | undefined): string {
+  return currency === 'USD' ? '"US$" #,##0.00' : '"S/" #,##0.00';
 }

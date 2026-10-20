@@ -16,5 +16,11 @@ export const PLATFORM = {
   ],
 } as const;
 
+/**
+ * Pestaña «Mi plan» en Configuración (y los enlaces a ella). Oculta por ahora:
+ * poner en true para volver a mostrarla.
+ */
+export const SHOW_PLAN_TAB = false;
+
 export const whatsappLink = (text: string) =>
   `https://wa.me/${PLATFORM.supportWhatsapp}?text=${encodeURIComponent(text)}`;

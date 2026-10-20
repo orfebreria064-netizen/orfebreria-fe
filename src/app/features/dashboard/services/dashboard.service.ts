@@ -9,9 +9,13 @@ export interface DashboardData {
     in_production: number;
     ready_to_deliver: number;
     pending_quotations: number;
+    /** Montos en soles; los de pedidos en dólares van en *_usd. */
     sales_month: number;
+    sales_month_usd: number;
     collected_month: number;
+    collected_month_usd: number;
     receivable: number;
+    receivable_usd: number;
     overdue_orders: number;
   };
   orders_by_status: { status: OrderStatus; count: number }[];
@@ -26,11 +30,12 @@ export interface DashboardData {
     due_date: string;
     status: OrderStatus;
     balance: number;
+    currency: string;
   }[];
   alerts: {
     overdue: { id: string; number: string; customer_name: string; due_date: string }[];
-    pending_quotations: { id: string; number: string; customer_name: string; expiry_date: string; total: number }[];
-    pending_payments: { id: string; number: string; customer_name: string; balance: number }[];
+    pending_quotations: { id: string; number: string; customer_name: string; expiry_date: string; total: number; currency: string }[];
+    pending_payments: { id: string; number: string; customer_name: string; balance: number; currency: string }[];
     upcoming: { id: string; number: string; customer_name: string; due_date: string }[];
   };
 }

@@ -6,7 +6,9 @@ import { OrderRow } from '../../orders/models/order.model';
 import { ORDER_ROW_SELECT } from '../../orders/services/orders.service';
 import { Payment, PaymentInput } from '../models/payment.model';
 
-const PAYMENT_SELECT = '*, order:orders(id, number, customer:customers(id, full_name))';
+/** balance_after y created_by_name son columnas calculadas para el recibo (0012_taller_joyeros_precios.sql). */
+const PAYMENT_SELECT =
+  '*, balance_after, created_by_name, order:orders(id, number, title, customer:customers(id, full_name, document_type, document_number))';
 
 export interface PaymentFilters {
   from?: string | null;
@@ -42,8 +44,14 @@ export class PaymentsService {
     ) as Payment[];
   }
 
-  async create(input: PaymentInput): Promise<void> {
-    unwrap(await this.db.from('payments').insert(emptyToNull(input)));
+  /** Registra el pago (la base emite su recibo de ingreso). Devuelve el id del pago. */
+  async create(input: PaymentInput): Promise<string> {
+    return (unwrap(await this.db.from('payments').insert(emptyToNull(input)).select('id').single()) as { id: string }).id;
+  }
+
+  /** Número del recibo de ingreso (los pagos anteriores a los recibos lo reciben aquí). */
+  async issueReceipt(id: string): Promise<string> {
+    return unwrap(await this.db.rpc('issue_payment_receipt', { p_payment_id: id })) as string;
   }
 
   /** Los pagos no se eliminan: se anulan con motivo (queda en auditoría). */

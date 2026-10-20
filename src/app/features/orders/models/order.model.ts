@@ -1,5 +1,6 @@
 import {
   AttachmentCategory,
+  Currency,
   HistoryEventType,
   OrderStatus,
   PaymentStatus,
@@ -35,6 +36,7 @@ export interface Order {
   tax_rate: number;
   tax_amount: number;
   total: number;
+  currency: Currency;
   amount_paid: number;
   balance: number;
   payment_status: PaymentStatus;
@@ -42,6 +44,19 @@ export interface Order {
   current_stage_name: string | null;
   qc_approved: boolean;
   qc_approved_at: string | null;
+  // Proforma y orden de producción (número asignado al emitirlas por primera vez)
+  proforma_number: string | null;
+  production_number: string | null;
+  // Taller (joyero externo)
+  jeweler_id: string | null;
+  material_delivered_at: string | null;
+  material_weight_out: number | null;
+  production_instructions: string | null;
+  product_delivered_at: string | null;
+  weight_returned: number | null;
+  production_notes: string | null;
+  /** Merma = peso entregado al joyero - peso devuelto (la calcula la base). */
+  waste_weight: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -57,6 +72,7 @@ export interface OrderDetail extends Order {
   service_type: { name: string } | null;
   assignee: { id: string; full_name: string } | null;
   quotation: { id: string; number: string } | null;
+  jeweler: { id: string; full_name: string; document_number: string | null; phone: string | null } | null;
   customer: {
     id: string;
     full_name: string;
@@ -84,6 +100,19 @@ export interface OrderHeaderInput {
   start_date: string;
   due_date: string | null;
   tax_rate: number;
+  currency: Currency;
+}
+
+/** Orden de producción (taller): fechas en ISO (yyyy-mm-dd), pesos en gramos. */
+export interface ProductionOrderInput {
+  order_id: string;
+  jeweler_id: string | null;
+  material_delivered_at: string | null;
+  material_weight_out: number | null;
+  production_instructions: string | null;
+  product_delivered_at: string | null;
+  weight_returned: number | null;
+  production_notes: string | null;
 }
 
 export interface OrderStage {

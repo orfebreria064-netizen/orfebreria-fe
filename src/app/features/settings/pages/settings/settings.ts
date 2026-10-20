@@ -30,7 +30,7 @@ import {
   SAAS_PAYMENT_METHOD_LABELS,
   SubscriptionPayment,
 } from '../../../../core/models/subscription.model';
-import { PLATFORM, whatsappLink } from '../../../../core/config/platform';
+import { PLATFORM, SHOW_PLAN_TAB, whatsappLink } from '../../../../core/config/platform';
 import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { PageHeader } from '../../../../shared/components/page-header/page-header';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
@@ -74,6 +74,13 @@ export class Settings implements OnInit {
 
   /** Pestaña inicial (?tab=plan desde el aviso de vencimiento). */
   readonly tab = input<string>();
+
+  protected readonly showPlanTab = SHOW_PLAN_TAB;
+  /** Si la pestaña pedida está oculta (p. ej. ?tab=plan), se abre Empresa. */
+  protected readonly initialTab = computed(() => {
+    const t = this.tab();
+    return !t || (t === 'plan' && !SHOW_PLAN_TAB) ? 'company' : t;
+  });
 
   protected readonly invitations = signal<Invitation[]>([]);
   protected readonly plans = signal<Plan[]>([]);
@@ -122,6 +129,11 @@ export class Settings implements OnInit {
     tax_rate: [18, [Validators.required, Validators.min(0), Validators.max(100)]],
     quote_validity_days: [15, [Validators.required, Validators.min(1), Validators.max(365)]],
     default_terms: [''],
+    // Documentos impresos
+    logo: [''],
+    slogan: ['', Validators.maxLength(500)],
+    mobile: ['', Validators.maxLength(80)],
+    city: ['', Validators.maxLength(60)],
   });
 
   async ngOnInit(): Promise<void> {
@@ -138,6 +150,10 @@ export class Settings implements OnInit {
           tax_rate: Number(s.tax_rate),
           quote_validity_days: s.quote_validity_days,
           default_terms: s.default_terms ?? '',
+          logo: s.logo ?? '',
+          slogan: s.slogan ?? '',
+          mobile: s.mobile ?? '',
+          city: s.city ?? '',
         });
       }
       this.stages.set(this.lookups.stageTemplates());
@@ -176,6 +192,34 @@ export class Settings implements OnInit {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  /** Logo para los documentos: se reduce a 600 px de ancho como máximo y se guarda como PNG/JPEG en base64. */
+  protected async onLogoSelected(event: Event): Promise<void> {
+    const inputEl = event.target as HTMLInputElement;
+    const file = inputEl.files?.[0];
+    inputEl.value = '';
+    if (!file) return;
+    if (!/^image\/(png|jpeg)$/.test(file.type)) {
+      this.notify.warn('El logo debe ser una imagen PNG o JPG.');
+      return;
+    }
+    try {
+      const dataUrl = await resizeImage(file, 600);
+      if (dataUrl.length > 700_000) {
+        this.notify.warn('La imagen es demasiado pesada. Use un logo más liviano (máximo 500 KB).');
+        return;
+      }
+      this.company.controls.logo.setValue(dataUrl);
+      this.company.markAsDirty();
+    } catch {
+      this.notify.warn('No se pudo leer la imagen.');
+    }
+  }
+
+  protected removeLogo(): void {
+    this.company.controls.logo.setValue('');
+    this.company.markAsDirty();
   }
 
   // ------------------------------------------------------------ Usuarios
@@ -340,4 +384,26 @@ export class Settings implements OnInit {
     this.stages.set(this.lookups.stageTemplates());
     this.serviceTypes.set(this.lookups.serviceTypes());
   }
+}
+
+/** Reduce la imagen al ancho indicado (sin agrandarla). PNG conserva la transparencia; JPEG se recomprime. */
+function resizeImage(file: File, maxWidth: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxWidth / img.naturalWidth);
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.round(img.naturalWidth * scale);
+      canvas.height = Math.round(img.naturalHeight * scale);
+      canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(file.type === 'image/png' ? canvas.toDataURL('image/png') : canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Imagen no válida'));
+    };
+    img.src = url;
+  });
 }

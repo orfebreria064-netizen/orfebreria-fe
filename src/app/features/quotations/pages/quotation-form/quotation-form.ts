@@ -8,6 +8,7 @@ import { SelectModule } from 'primeng/select';
 import { DatePickerModule } from 'primeng/datepicker';
 import { TextareaModule } from 'primeng/textarea';
 import { SkeletonModule } from 'primeng/skeleton';
+import { CURRENCY_OPTIONS, Currency } from '../../../../core/models/domain';
 import { LookupService } from '../../../../core/services/lookup.service';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { BreadcrumbService } from '../../../../layout/breadcrumb.service';
@@ -64,6 +65,7 @@ export class QuotationForm implements OnInit {
   protected readonly materials = signal<Material[]>([]);
   protected readonly number = signal<string | null>(null);
 
+  protected readonly currencies = CURRENCY_OPTIONS;
   protected readonly items = new FormArray<ItemFormGroup>([]);
   protected readonly form = inject(FormBuilder).group(
     {
@@ -79,6 +81,7 @@ export class QuotationForm implements OnInit {
       notes: ['', Validators.maxLength(2000)],
       terms: ['', Validators.maxLength(2000)],
       tax_rate: [18 as number | null, [Validators.required, Validators.min(0), Validators.max(100)]],
+      currency: ['PEN' as Currency, Validators.required],
     },
     { validators: dateRangeValidator('issue_date', 'expiry_date', 'El vencimiento no puede ser anterior a la fecha de emisión.') },
   );
@@ -107,6 +110,7 @@ export class QuotationForm implements OnInit {
       expiry_date: addDays(new Date(), validity),
       terms: settings?.default_terms ?? '',
       tax_rate: this.lookups.taxRate(),
+      currency: settings?.currency === 'USD' ? 'USD' : 'PEN',
     });
     this.items.push(createItemGroup());
   }
@@ -133,6 +137,7 @@ export class QuotationForm implements OnInit {
       notes: q.notes ?? '',
       terms: q.terms ?? '',
       tax_rate: Number(q.tax_rate),
+      currency: q.currency ?? 'PEN',
     });
     this.items.clear();
     q.items.forEach((item) => this.items.push(createItemGroup(item)));
@@ -140,6 +145,10 @@ export class QuotationForm implements OnInit {
 
   protected taxRate(): number {
     return Number(this.form.controls.tax_rate.value ?? 0);
+  }
+
+  protected currency(): string {
+    return this.form.controls.currency.value ?? 'PEN';
   }
 
   async submit(): Promise<void> {
@@ -164,6 +173,7 @@ export class QuotationForm implements OnInit {
       notes: v.notes?.trim() || null,
       terms: v.terms?.trim() || null,
       tax_rate: Number(v.tax_rate),
+      currency: v.currency ?? 'PEN',
     };
     try {
       const id = await this.service.save(this.id() ?? null, header, itemsFromArray(this.items));

@@ -1,8 +1,8 @@
 import { AppRole } from '../models/domain';
 
 /**
- * Permisos de navegación por módulo (solo UX). La autorización real está en las políticas RLS
- * de Supabase (supabase/migrations/0008_rls_storage.sql); mantener ambas matrices alineadas.
+ * Permisos de navegación por módulo (solo UX). La autorización real está en los procedimientos
+ * api.usp_* de la base de datos (database/mssql/orfebreria_mssql.sql); mantener ambas matrices alineadas.
  */
 export const MODULE_ROLES = {
   dashboard: ['ADMIN', 'GERENTE'],
@@ -19,6 +19,12 @@ export const MODULE_ROLES = {
   payments: ['ADMIN', 'GERENTE', 'VENDEDOR'],
   paymentsVoid: ['ADMIN', 'GERENTE'],
   deliveries: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
+  /** Orden de producción del pedido (joyero, material entregado, acabado). */
+  workshop: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
+  jewelers: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
+  jewelersWrite: ['ADMIN', 'GERENTE', 'SUPERVISOR'],
+  /** Recibos de egreso (pagos a joyeros). */
+  jewelerPayments: ['ADMIN', 'GERENTE'],
   reports: ['ADMIN', 'GERENTE'],
   settings: ['ADMIN'],
 } as const satisfies Record<string, readonly AppRole[]>;

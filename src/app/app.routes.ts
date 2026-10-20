@@ -54,6 +54,12 @@ export const routes: Routes = [
         loadChildren: () => import('./features/production/production.routes').then((m) => m.PRODUCTION_ROUTES),
       },
       {
+        path: 'jewelers',
+        data: { breadcrumb: 'Joyeros', roles: MODULE_ROLES.jewelers },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/jewelers/jewelers.routes').then((m) => m.JEWELERS_ROUTES),
+      },
+      {
         path: 'materials',
         data: { breadcrumb: 'Materiales', roles: MODULE_ROLES.materials },
         canActivate: [roleGuard],

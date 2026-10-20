@@ -188,16 +188,22 @@ export const OWNERSHIP_LABELS: Record<MaterialOwnership, string> = { EMPRESA: 'E
 export const OWNERSHIP_OPTIONS = toOptions(OWNERSHIP_LABELS);
 
 // ---------------------------------------------------------------- Pagos
-export type PaymentMethod = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'TARJETA' | 'OTRO';
+export type PaymentMethod = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'TARJETA' | 'CHEQUE' | 'OTRO';
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   EFECTIVO: 'Efectivo',
   YAPE: 'Yape',
   PLIN: 'Plin',
   TRANSFERENCIA: 'Transferencia',
   TARJETA: 'Tarjeta',
+  CHEQUE: 'Cheque',
   OTRO: 'Otro',
 };
 export const PAYMENT_METHOD_OPTIONS = toOptions(PAYMENT_METHOD_LABELS);
+
+// ---------------------------------------------------------------- Moneda (por documento)
+export type Currency = 'PEN' | 'USD';
+export const CURRENCY_LABELS: Record<Currency, string> = { PEN: 'Soles (S/)', USD: 'Dólares (US$)' };
+export const CURRENCY_OPTIONS = toOptions(CURRENCY_LABELS);
 
 // ---------------------------------------------------------------- Entregas
 export type DeliveryStatus = 'PENDIENTE' | 'LISTA' | 'ENTREGADA' | 'NO_ENTREGADA';
@@ -237,8 +243,12 @@ export type HistoryEventType =
   | 'MATERIAL'
   | 'ARCHIVO'
   | 'ENTREGA'
-  | 'CIERRE';
+  | 'CIERRE'
+  | 'DOCUMENTO'
+  | 'EGRESO';
 export const HISTORY_EVENT_ICONS: Record<HistoryEventType, string> = {
+  DOCUMENTO: 'pi pi-file',
+  EGRESO: 'pi pi-arrow-up-right',
   CREACION: 'pi pi-plus-circle',
   MODIFICACION: 'pi pi-pencil',
   ESTADO: 'pi pi-sync',

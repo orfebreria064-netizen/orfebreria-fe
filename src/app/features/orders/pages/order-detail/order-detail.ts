@@ -29,8 +29,10 @@ import { PaymentsService } from '../../../payments/services/payments.service';
 import { OrderDeliveries } from '../../../deliveries/components/order-deliveries/order-deliveries';
 import { Delivery } from '../../../deliveries/models/delivery.model';
 import { DeliveriesService } from '../../../deliveries/services/deliveries.service';
+import { OrderWorkshop } from '../../components/order-workshop/order-workshop';
+import { OrderDocumentsService } from '../../services/order-documents.service';
 
-type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 'history';
+type OrderTab = 'summary' | 'production' | 'workshop' | 'materials' | 'payments' | 'files' | 'history';
 
 /** Vista principal del pedido / orden de trabajo: /orders/:id */
 @Component({
@@ -53,6 +55,7 @@ type OrderTab = 'summary' | 'production' | 'materials' | 'payments' | 'files' | 
     OrderMaterials,
     OrderPayments,
     OrderDeliveries,
+    OrderWorkshop,
   ],
   templateUrl: './order-detail.html',
   styleUrl: './order-detail.scss',
@@ -62,6 +65,7 @@ export class OrderDetailPage implements OnInit {
   private readonly production = inject(ProductionService);
   private readonly paymentsService = inject(PaymentsService);
   private readonly deliveriesService = inject(DeliveriesService);
+  private readonly documents = inject(OrderDocumentsService);
   private readonly notify = inject(NotifyService);
   private readonly confirm = inject(ConfirmationService);
   private readonly router = inject(Router);
@@ -93,6 +97,8 @@ export class OrderDetailPage implements OnInit {
   protected readonly canChangeStatus = this.auth.hasRole(...MODULE_ROLES.ordersStatus);
   protected readonly canSeeMoney = this.auth.hasRole(...MODULE_ROLES.payments);
   protected readonly canDeliver = this.auth.hasRole(...MODULE_ROLES.deliveries);
+  protected readonly canWorkshop = this.auth.hasRole(...MODULE_ROLES.workshop);
+  protected readonly printingProforma = signal(false);
 
   protected readonly locked = computed(() => {
     const status = this.order()?.status;
@@ -109,6 +115,8 @@ export class OrderDetailPage implements OnInit {
     }
     if (this.canDeliver && !this.locked()) items.push({ label: 'Registrar entrega', icon: 'pi pi-truck', command: () => this.openDelivery() });
     if (this.canSeeMoney && !this.locked()) items.push({ label: 'Registrar pago', icon: 'pi pi-wallet', command: () => this.openPayment() });
+    if (this.canSeeMoney) items.push({ label: 'Proforma (4 copias)', icon: 'pi pi-print', command: () => void this.printProforma() });
+    if (this.canWorkshop) items.push({ label: 'Orden de producción', icon: 'pi pi-hammer', command: () => this.tab.set('workshop') });
     if (!this.locked()) items.push({ label: 'Registrar material', icon: 'pi pi-box', command: () => this.openMaterial() });
     if (!this.locked()) items.push({ label: 'Subir archivo', icon: 'pi pi-upload', command: () => this.tab.set('files') });
     if (this.canChangeStatus) items.push({ label: 'Cambiar estado', icon: 'pi pi-sync', command: () => this.statusDialog.set(true) });
@@ -199,6 +207,22 @@ export class OrderDetailPage implements OnInit {
   protected openPayment(): void {
     this.tab.set('payments');
     this.paymentDialog.set(true);
+  }
+
+  /** Proforma en 4 copias (cliente, taller, caja, archivo) con lo pagado y el saldo. */
+  protected async printProforma(): Promise<void> {
+    const o = this.order();
+    if (!o) return;
+    this.printingProforma.set(true);
+    try {
+      const hadNumber = !!o.proforma_number;
+      await this.documents.proforma(o);
+      if (!hadNumber) await this.load();
+    } catch (err) {
+      this.notify.error(err, 'No se pudo generar la proforma.');
+    } finally {
+      this.printingProforma.set(false);
+    }
   }
 
   protected openMaterial(): void {

@@ -12,6 +12,31 @@ export interface Material {
   active: boolean;
   created_at: string;
   updated_at: string;
+  /** Precio de venta vigente por unidad (último registrado con fecha <= hoy). */
+  day_price?: number | null;
+  day_price_date?: string | null;
+}
+
+/** Fila de "Precios del día" (api.usp_material_prices_current). */
+export interface MaterialPrice {
+  material_id: string;
+  name: string;
+  type: MaterialType;
+  purity: string | null;
+  unit: MaterialUnit;
+  reference_cost: number;
+  price: number | null;
+  price_date: string | null;
+  previous_price: number | null;
+  previous_date: string | null;
+  updated_by: string | null;
+}
+
+export interface MaterialPriceHistory {
+  price_date: string;
+  price: number;
+  updated_by: string | null;
+  updated_at: string;
 }
 
 export type MaterialInput = Pick<Material, 'name' | 'type' | 'purity' | 'unit' | 'min_stock' | 'reference_cost' | 'active'> & {

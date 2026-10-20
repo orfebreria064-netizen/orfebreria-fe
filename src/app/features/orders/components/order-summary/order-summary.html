@@ -85,13 +85,13 @@
       </h3>
       <dl class="dl">
         <dt>Total</dt>
-        <dd class="mono">{{ o.total | money }}</dd>
+        <dd class="mono">{{ o.total | money: o.currency }}</dd>
         <dt>Adelanto</dt>
-        <dd class="mono">{{ advance() | money }}</dd>
+        <dd class="mono">{{ advance() | money: o.currency }}</dd>
         <dt>Pagado</dt>
-        <dd class="mono text-success">{{ o.amount_paid | money }}</dd>
+        <dd class="mono text-success">{{ o.amount_paid | money: o.currency }}</dd>
         <dt>Saldo</dt>
-        <dd class="mono strong" [class.text-danger]="o.balance > 0">{{ o.balance | money }}</dd>
+        <dd class="mono strong" [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</dd>
       </dl>
     </section>
   }
@@ -130,8 +130,8 @@
       <td>{{ it.material_name || '—' }}</td>
       <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
       @if (showMoney()) {
-        <td class="text-right mono nowrap">{{ it.unit_price | money }}</td>
-        <td class="text-right mono nowrap">{{ it.subtotal | money }}</td>
+        <td class="text-right mono nowrap">{{ it.unit_price | money: o.currency }}</td>
+        <td class="text-right mono nowrap">{{ it.subtotal | money: o.currency }}</td>
       }
     </tr>
   </ng-template>

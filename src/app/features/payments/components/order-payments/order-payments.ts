@@ -16,19 +16,21 @@ import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { Order } from '../../../orders/models/order.model';
 import { Payment } from '../../models/payment.model';
 import { PaymentsService } from '../../services/payments.service';
+import { ReceiptPdfService } from '../../services/receipt-pdf.service';
 import { PaymentDialog } from '../payment-dialog/payment-dialog';
+import { TooltipModule } from 'primeng/tooltip';
 
 /** Pestaña "Pagos" del pedido: total, pagos, saldo y anulaciones. */
 @Component({
   selector: 'app-order-payments',
-  imports: [DatePipe, FormsModule, ButtonModule, TableModule, TagModule, DialogModule, TextareaModule, EmptyState, LabelPipe, MoneyPipe, PaymentDialog],
+  imports: [DatePipe, FormsModule, ButtonModule, TableModule, TagModule, DialogModule, TextareaModule, TooltipModule, EmptyState, LabelPipe, MoneyPipe, PaymentDialog],
   template: `
     <div class="amounts" style="margin-bottom: 1rem">
-      <div><small>Total pedido</small><strong>{{ order().total | money }}</strong></div>
-      <div><small>Total pagos</small><strong class="text-success">{{ order().amount_paid | money }}</strong></div>
+      <div><small>Total pedido</small><strong>{{ order().total | money: order().currency }}</strong></div>
+      <div><small>Total pagos</small><strong class="text-success">{{ order().amount_paid | money: order().currency }}</strong></div>
       <div>
         <small>Saldo</small>
-        <strong [class.text-danger]="order().balance > 0">{{ order().balance | money }}</strong>
+        <strong [class.text-danger]="order().balance > 0">{{ order().balance | money: order().currency }}</strong>
         <p-tag [value]="statusLabels[order().payment_status]" [severity]="statusSeverity[order().payment_status]" [style]="{ 'align-self': 'flex-start', 'margin-top': '0.25rem' }" />
       </div>
     </div>
@@ -42,11 +44,12 @@ import { PaymentDialog } from '../payment-dialog/payment-dialog';
 
     <p-table [value]="payments()" [scrollable]="true" [tableStyle]="{ 'min-width': '680px' }" size="small">
       <ng-template #header>
-        <tr><th>Fecha</th><th>Método</th><th>Referencia</th><th>Observaciones</th><th class="text-right">Monto</th><th></th></tr>
+        <tr><th>Fecha</th><th>Recibo</th><th>Método</th><th>Referencia</th><th>Observaciones</th><th class="text-right">Monto</th><th></th></tr>
       </ng-template>
       <ng-template #body let-p>
         <tr [style.opacity]="p.voided ? 0.55 : 1">
           <td class="nowrap">{{ p.payment_date | date: 'dd/MM/yyyy' }}</td>
+          <td class="nowrap mono">{{ p.receipt_number || '—' }}</td>
           <td class="nowrap">
             {{ p.method | label: methodLabels }}
             @if (p.is_advance) {
@@ -58,8 +61,9 @@ import { PaymentDialog } from '../payment-dialog/payment-dialog';
           </td>
           <td>{{ p.reference || '—' }}</td>
           <td>{{ p.voided ? 'Anulado: ' + p.void_reason : p.notes || '—' }}</td>
-          <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money }}</td>
-          <td class="text-right">
+          <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money: p.currency }}</td>
+          <td class="text-right nowrap">
+            <p-button icon="pi pi-print" [text]="true" severity="secondary" size="small" ariaLabel="Imprimir recibo de ingreso" pTooltip="Recibo de ingreso" (onClick)="printReceipt(p)" />
             @if (canVoid && !p.voided && !readonly()) {
               <p-button icon="pi pi-ban" [text]="true" severity="danger" size="small" ariaLabel="Anular pago" (onClick)="openVoid(p)" />
             }
@@ -67,7 +71,7 @@ import { PaymentDialog } from '../payment-dialog/payment-dialog';
         </tr>
       </ng-template>
       <ng-template #emptymessage>
-        <tr><td colspan="6"><app-empty-state icon="pi pi-wallet" message="Aún no hay pagos registrados." /></td></tr>
+        <tr><td colspan="7"><app-empty-state icon="pi pi-wallet" message="Aún no hay pagos registrados." /></td></tr>
       </ng-template>
     </p-table>
 
@@ -87,6 +91,7 @@ import { PaymentDialog } from '../payment-dialog/payment-dialog';
 })
 export class OrderPayments {
   private readonly service = inject(PaymentsService);
+  private readonly receipts = inject(ReceiptPdfService);
   private readonly notify = inject(NotifyService);
   private readonly auth = inject(AuthService);
 
@@ -107,6 +112,16 @@ export class OrderPayments {
   private voidTarget: Payment | null = null;
 
   protected readonly validCount = computed(() => this.payments().filter((p) => !p.voided).length);
+
+  protected async printReceipt(p: Payment): Promise<void> {
+    try {
+      const hadNumber = !!p.receipt_number;
+      await this.receipts.income(p);
+      if (!hadNumber) this.changed.emit();
+    } catch (err) {
+      this.notify.error(err, 'No se pudo generar el recibo.');
+    }
+  }
 
   protected openVoid(p: Payment): void {
     this.voidTarget = p;

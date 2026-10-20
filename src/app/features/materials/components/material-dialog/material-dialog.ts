@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -43,8 +43,14 @@ import { MaterialsService } from '../../services/materials.service';
           <p-select inputId="mt-unit" [options]="units" formControlName="unit" optionLabel="label" optionValue="value" appendTo="body" />
         </div>
         <div class="field">
-          <label for="mt-cost">Costo de referencia</label>
+          <label for="mt-price">Precio de venta del día</label>
+          <p-inputnumber inputId="mt-price" formControlName="day_price" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+          <small class="muted">Por {{ unitLabel() }}. Se sugiere en cotizaciones y pedidos.</small>
+        </div>
+        <div class="field">
+          <label for="mt-cost">Costo de compra (referencial)</label>
           <p-inputnumber inputId="mt-cost" formControlName="reference_cost" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+          <small class="muted">Valoriza el inventario; no se cobra al cliente.</small>
           <app-field-error [control]="form.controls.reference_cost" />
         </div>
         @if (!material()) {
@@ -97,6 +103,7 @@ export class MaterialDialog {
     stock: [0, [Validators.min(0)]],
     min_stock: [0, [Validators.min(0)]],
     reference_cost: [0, [Validators.min(0)]],
+    day_price: [null as number | null, [Validators.min(0)]],
     active: [true],
   });
 
@@ -104,7 +111,8 @@ export class MaterialDialog {
     effect(() => {
       if (!this.visible()) return;
       const m = this.material();
-      this.form.reset({
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
+      untracked(() => this.form.reset({
         name: m?.name ?? '',
         type: m?.type ?? 'ORO',
         purity: m?.purity ?? '',
@@ -112,8 +120,9 @@ export class MaterialDialog {
         stock: 0,
         min_stock: Number(m?.min_stock ?? 0),
         reference_cost: Number(m?.reference_cost ?? 0),
+        day_price: m?.day_price != null ? Number(m.day_price) : null,
         active: m?.active ?? true,
-      });
+      }));
     });
     // Metales en gramos y piedras en quilates por defecto.
     this.form.controls.type.valueChanges.subscribe((type) => {
@@ -126,18 +135,27 @@ export class MaterialDialog {
     return METAL_TYPES.includes(this.form.controls.type.value);
   }
 
+  protected unitLabel(): string {
+    return { g: 'gramo', ct: 'quilate', und: 'unidad' }[this.form.controls.unit.value];
+  }
+
   async save(): Promise<void> {
     if (this.form.invalid) {
       this.form.markAllAsTouched();
       return;
     }
     this.saving.set(true);
-    const { stock, ...rest } = this.form.getRawValue();
+    const { stock, day_price, ...rest } = this.form.getRawValue();
     const data = { ...rest, name: rest.name.trim(), purity: rest.purity.trim() || null };
     try {
       const current = this.material();
+      let id = current?.id ?? null;
       if (current) await this.service.update(current.id, data);
-      else await this.service.create({ ...data, stock });
+      else id = await this.service.create({ ...data, stock });
+      // El precio de venta se guarda como precio de hoy solo si cambió.
+      if (id && day_price && day_price !== Number(current?.day_price ?? 0)) {
+        await this.service.savePrices([{ material_id: id, price: day_price }]);
+      }
       this.notify.success(current ? 'Material actualizado correctamente.' : 'Material creado correctamente.');
       this.visible.set(false);
       this.saved.emit();

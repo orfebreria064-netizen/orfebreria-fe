@@ -1,4 +1,4 @@
-import { Component, computed, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, computed, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -137,10 +137,14 @@ export class MovementDialog {
   });
 
   constructor() {
+    // Solo reacciona a la apertura: form.reset() lee signals internos de los controles de PrimeNG y,
+    // si se rastrearan, cada selección volvería a ejecutar el efecto y limpiaría el formulario.
     effect(() => {
       if (!this.visible()) return;
-      this.reset();
-      void this.loadData();
+      untracked(() => {
+        this.reset();
+        void this.loadData();
+      });
     });
     this.form.controls.ownership.valueChanges.subscribe((ownership) => {
       const allowed = ownership === 'CLIENTE' ? CLIENT_TYPES : COMPANY_TYPES;

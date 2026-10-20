@@ -1,4 +1,4 @@
-import { Component, effect, inject, input, model, output, signal } from '@angular/core';
+import { Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -131,15 +131,18 @@ export class SubscriptionDialog {
       if (!this.visible()) return;
       const o = this.org();
       if (!o) return;
-      this.form.reset({
-        plan_code: o.plan_code,
-        status: o.status,
-        current_period_end: fromIsoDate(o.current_period_end) ?? new Date(),
-        grace_days: o.grace_days,
-        extra_users: o.extra_users,
-        notes: o.notes ?? '',
+      // untracked: form.reset() lee signals internos de PrimeNG; rastrearlos reiniciaría el formulario al editar.
+      untracked(() => {
+        this.form.reset({
+          plan_code: o.plan_code,
+          status: o.status,
+          current_period_end: fromIsoDate(o.current_period_end) ?? new Date(),
+          grace_days: o.grace_days,
+          extra_users: o.extra_users,
+          notes: o.notes ?? '',
+        });
+        this.invite.reset({ full_name: '', email: '' });
       });
-      this.invite.reset({ full_name: '', email: '' });
     });
   }
 
