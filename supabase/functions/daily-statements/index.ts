@@ -1,12 +1,14 @@
 // Correos al cierre del día (0015_estados_de_cuenta.sql). pg_cron la llama cada hora en punto.
-//   * Estado de cuenta a cada cliente con pagos, adelantos o anulaciones del día (si tiene correo
-//     y no lo desactivó): movimientos del día y saldo de sus pedidos.
+//   * Estado de cuenta a cada cliente con pagos, adelantos o anulaciones nuevos (si tiene correo
+//     y no lo desactivó): movimientos desde su último estado de cuenta y saldo de sus pedidos.
 //   * Cierre de caja a los ADMIN y GERENTE de la empresa.
 // Solo procesa las empresas con la opción activa cuya hora configurada (Lima) es la actual.
 // Se despliega con --no-verify-jwt y se protege con el encabezado x-cron-secret (Vault).
-// Correo vía Resend (RESEND_API_KEY, MAIL_FROM). Sin esas variables no envía nada.
-// Remitente: el nombre de la empresa con la dirección de MAIL_FROM (dominio verificado en Resend);
-// "Responder a": el correo de la empresa o, si no tiene, el de su ADMIN.
+// Envío por Brevo: API key y remitente verificado en Vault (statement_mail_config, 0017).
+// Respaldo: Resend (RESEND_API_KEY, MAIL_FROM). Sin ninguno configurado no envía nada.
+// Remitente: el nombre de la empresa con la dirección verificada; "Responder a": el correo de la
+// empresa o, si no tiene, el de su ADMIN.
+// El estado de cuenta de cada cliente trae todo lo ocurrido desde el último que se le envió.
 // Prueba manual: body { "org_id": "...", "date": "2026-10-20", "dry_run": true } devuelve el HTML sin enviar.
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
 import { corsHeaders, env, json } from '../_shared/http.ts';
@@ -62,6 +64,11 @@ interface StatementData {
   company: Company;
   customers: CustomerStatement[];
   closing: Closing | null;
+}
+interface MailConfig {
+  provider: 'brevo' | 'resend';
+  apiKey: string;
+  senderEmail: string;
 }
 interface Mail {
   kind: 'CLIENTE' | 'CIERRE';
@@ -129,6 +136,7 @@ function layout(company: Company, title: string, body: string, hasLogo: boolean)
 function customerMail(d: StatementData, c: CustomerStatement, hasLogo: boolean): Mail {
   const moves = c.movements ?? [];
   const rows = moves.map((m) => [
+    fmtDate(m.payment_date),
     esc(m.receipt_number ?? '—'),
     `${esc(m.order_number)}<br><span style="color:#6b7280;font-size:12px">${esc(m.order_title)}</span>`,
     `${m.voided ? '<b style="color:#b91c1c">Anulado</b>' : m.is_advance ? 'Adelanto' : 'Pago'} · ${METHODS[m.method] ?? esc(m.method)}` +
@@ -148,9 +156,9 @@ function customerMail(d: StatementData, c: CustomerStatement, hasLogo: boolean):
     .map(([cur, v]) => money(v, cur));
   const body = `
     <p style="font-size:14px">Hola <b>${esc(c.name)}</b>,</p>
-    <p style="font-size:14px">Este es el resumen de sus movimientos del <b>${fmtDate(d.date)}</b> en ${esc(d.company.name)}.</p>
-    <h3 style="font-size:14px;margin:18px 0 4px">Movimientos del día</h3>
-    ${table(['Recibo', 'Pedido', 'Detalle', 'Monto'], rows, [3])}
+    <p style="font-size:14px">Este es el resumen de sus pagos en ${esc(d.company.name)} registrados desde nuestro último estado de cuenta.</p>
+    <h3 style="font-size:14px;margin:18px 0 4px">Movimientos</h3>
+    ${table(['Fecha', 'Recibo', 'Pedido', 'Detalle', 'Monto'], rows, [4])}
     <h3 style="font-size:14px;margin:18px 0 4px">Estado de sus pedidos</h3>
     ${orders.length ? table(['Pedido', 'Total', 'Pagado', 'Saldo'], orders, [1, 2, 3]) : '<p style="font-size:13px">No tiene pedidos con saldo pendiente.</p>'}
     <p style="font-size:14px">${totals.length ? `Saldo pendiente total: <b>${totals.join(' · ')}</b>` : '<b>No tiene saldos pendientes.</b> ¡Gracias!'}</p>
@@ -159,7 +167,7 @@ function customerMail(d: StatementData, c: CustomerStatement, hasLogo: boolean):
     kind: 'CLIENTE',
     customer_id: c.customer_id,
     to: [c.email],
-    subject: `Estado de cuenta del ${fmtDate(d.date)} · ${d.company.name}`,
+    subject: `Estado de cuenta al ${fmtDate(d.date)} · ${d.company.name}`,
     html: layout(d.company, 'ESTADO DE CUENTA', body, hasLogo),
   };
 }
@@ -204,26 +212,54 @@ function closingMail(d: StatementData, k: Closing, hasLogo: boolean): Mail | nul
   };
 }
 
-/** "Empresa <avisos@dominio>": se toma solo la dirección de MAIL_FROM y se antepone el nombre de la empresa. */
-function sender(company: Company): string {
-  const from = env('MAIL_FROM');
-  const address = from.match(/<([^>]+)>/)?.[1] ?? from.trim();
-  return `"${company.name.replace(/["<>]/g, '')}" <${address}>`;
+/** Brevo (Vault) o, si no está, Resend (variables de entorno). null = sin configurar. */
+async function mailConfig(admin: ReturnType<typeof createClient>): Promise<MailConfig | null> {
+  const { data } = await admin.rpc('statement_mail_config');
+  const cfg = data as { brevo_api_key?: string | null; sender_email?: string | null } | null;
+  if (cfg?.brevo_api_key && cfg?.sender_email) {
+    return { provider: 'brevo', apiKey: cfg.brevo_api_key, senderEmail: cfg.sender_email };
+  }
+  const resendKey = Deno.env.get('RESEND_API_KEY');
+  const from = Deno.env.get('MAIL_FROM');
+  if (resendKey && from) {
+    return { provider: 'resend', apiKey: resendKey, senderEmail: from.match(/<([^>]+)>/)?.[1] ?? from.trim() };
+  }
+  return null;
 }
 
-async function send(mail: Mail, company: Company, logo: ReturnType<typeof logoAttachment>): Promise<{ ok: boolean; detail: string }> {
-  const res = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${env('RESEND_API_KEY')}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: sender(company),
-      to: mail.to,
-      ...(company.reply_to ? { reply_to: company.reply_to } : {}),
-      subject: mail.subject,
-      html: mail.html,
-      ...(logo ? { attachments: [logo] } : {}),
-    }),
-  });
+async function send(
+  mail: Mail,
+  company: Company,
+  cfg: MailConfig,
+  logo: ReturnType<typeof logoAttachment>,
+): Promise<{ ok: boolean; detail: string }> {
+  const name = company.name.replace(/["<>]/g, '');
+  const res =
+    cfg.provider === 'brevo'
+      ? await fetch('https://api.brevo.com/v3/smtp/email', {
+          method: 'POST',
+          headers: { 'api-key': cfg.apiKey, 'Content-Type': 'application/json', accept: 'application/json' },
+          body: JSON.stringify({
+            sender: { name, email: cfg.senderEmail },
+            to: mail.to.map((email) => ({ email })),
+            ...(company.reply_to ? { replyTo: { email: company.reply_to } } : {}),
+            subject: mail.subject,
+            htmlContent: mail.html,
+            tags: [mail.kind === 'CIERRE' ? 'cierre-caja' : 'estado-cuenta'],
+          }),
+        })
+      : await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${cfg.apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            from: `"${name}" <${cfg.senderEmail}>`,
+            to: mail.to,
+            ...(company.reply_to ? { reply_to: company.reply_to } : {}),
+            subject: mail.subject,
+            html: mail.html,
+            ...(logo ? { attachments: [logo] } : {}),
+          }),
+        });
   const text = await res.text();
   return { ok: res.ok, detail: res.ok ? text.slice(0, 200) : `${res.status} ${text.slice(0, 300)}` };
 }
@@ -238,8 +274,8 @@ Deno.serve(async (req) => {
 
     const input = (await req.json().catch(() => ({}))) as { org_id?: string; date?: string; dry_run?: boolean };
     const dryRun = input.dry_run === true;
-    const canSend = !!Deno.env.get('RESEND_API_KEY') && !!Deno.env.get('MAIL_FROM');
-    if (!dryRun && !canSend) return json({ ok: true, skipped: 'Faltan RESEND_API_KEY y MAIL_FROM: no se envió ningún correo.' });
+    const cfg = await mailConfig(admin);
+    if (!dryRun && !cfg) return json({ ok: true, skipped: 'No hay proveedor de correo configurado (Brevo o Resend): no se envió nada.' });
 
     const { data: orgs, error } = await admin.rpc('statement_orgs_due', { p_org: input.org_id ?? null });
     if (error) throw error;
@@ -250,7 +286,8 @@ Deno.serve(async (req) => {
       const { data, error: dataError } = await admin.rpc('daily_statement_data', { p_org: org.org_id, p_date: date });
       if (dataError) throw dataError;
       const d = data as StatementData;
-      const logo = logoAttachment(d.company);
+      // Brevo no admite imágenes incrustadas (cid): en ese caso el encabezado va sin logo
+      const logo = cfg?.provider === 'brevo' ? null : logoAttachment(d.company);
 
       const mails: Mail[] = d.customers.map((c) => customerMail(d, c, !!logo));
       const closing = d.closing ? closingMail(d, d.closing, !!logo) : null;
@@ -263,7 +300,7 @@ Deno.serve(async (req) => {
       let sent = 0;
       let errors = 0;
       for (const mail of mails) {
-        const r = await send(mail, d.company, logo);
+        const r = await send(mail, d.company, cfg!, logo);
         r.ok ? sent++ : errors++;
         await admin.from('statement_sends').insert({
           org_id: org.org_id, kind: mail.kind, statement_date: date, customer_id: mail.customer_id,
