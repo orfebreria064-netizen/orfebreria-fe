@@ -23,6 +23,7 @@ import { OrderAttachments } from '../../components/order-attachments/order-attac
 import { StatusDialog } from '../../components/status-dialog/status-dialog';
 import { OrderProduction } from '../../../production/components/order-production/order-production';
 import { OrderMaterials } from '../../../materials/components/order-materials/order-materials';
+import { OrderReceipts } from '../../../receipts/components/order-receipts/order-receipts';
 import { OrderPayments } from '../../../payments/components/order-payments/order-payments';
 import { Payment } from '../../../payments/models/payment.model';
 import { PaymentsService } from '../../../payments/services/payments.service';
@@ -53,6 +54,7 @@ type OrderTab = 'summary' | 'production' | 'workshop' | 'materials' | 'payments'
     StatusDialog,
     OrderProduction,
     OrderMaterials,
+    OrderReceipts,
     OrderPayments,
     OrderDeliveries,
     OrderWorkshop,
@@ -106,6 +108,14 @@ export class OrderDetailPage implements OnInit {
   });
 
   private readonly attachments = viewChild(OrderAttachments);
+  private readonly materialsView = viewChild(OrderMaterials);
+  protected readonly canWriteReceipts = this.auth.hasRole('ADMIN', 'GERENTE', 'VENDEDOR');
+
+  /** Un acta de material genera entradas del cliente: se recargan los materiales y el historial. */
+  protected onReceiptsChanged(): void {
+    void this.materialsView()?.load();
+    void this.refreshHistory();
+  }
   private readonly deliveriesBlock = viewChild(OrderDeliveries);
 
   protected readonly moreActions = computed<MenuItem[]>(() => {

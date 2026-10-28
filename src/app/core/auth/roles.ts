@@ -11,6 +11,8 @@ export const MODULE_ROLES = {
   quotations: ['ADMIN', 'GERENTE', 'VENDEDOR'],
   orders: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR', 'ORFEBRE'],
   ordersWrite: ['ADMIN', 'GERENTE', 'VENDEDOR'],
+  /** Reparaciones: pedido de tipo Reparación con su orden de recepción. */
+  repairs: ['ADMIN', 'GERENTE', 'VENDEDOR'],
   ordersStatus: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
   production: ['ADMIN', 'GERENTE', 'SUPERVISOR', 'ORFEBRE'],
   productionManage: ['ADMIN', 'GERENTE', 'SUPERVISOR'],

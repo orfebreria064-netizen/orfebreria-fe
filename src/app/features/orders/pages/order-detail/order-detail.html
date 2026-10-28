@@ -76,6 +76,7 @@
           </p-tabpanel>
         }
         <p-tabpanel value="materials">
+          <app-order-receipts [orderId]="o.id" [readonly]="locked() || !canWriteReceipts" (changed)="onReceiptsChanged()" />
           <app-order-materials [orderId]="o.id" [readonly]="locked()" [(dialog)]="materialDialog" (changed)="refreshHistory()" />
         </p-tabpanel>
         @if (canSeeMoney) {

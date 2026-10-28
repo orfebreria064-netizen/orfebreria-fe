@@ -48,6 +48,12 @@ export const routes: Routes = [
         loadChildren: () => import('./features/orders/orders.routes').then((m) => m.ORDERS_ROUTES),
       },
       {
+        path: 'reparaciones',
+        data: { breadcrumb: 'Reparaciones', roles: MODULE_ROLES.repairs },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/receipts/repairs.routes').then((m) => m.REPAIRS_ROUTES),
+      },
+      {
         path: 'production',
         data: { breadcrumb: 'Producción', roles: MODULE_ROLES.production },
         canActivate: [roleGuard],

@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { label: 'Clientes', icon: 'pi pi-users', route: '/customers', module: 'customers' },
   { label: 'Cotizaciones', icon: 'pi pi-file-edit', route: '/quotations', module: 'quotations' },
   { label: 'Pedidos', icon: 'pi pi-briefcase', route: '/orders', module: 'orders' },
+  { label: 'Reparaciones', icon: 'pi pi-wrench', route: '/reparaciones', module: 'repairs' },
   { label: 'Producción', icon: 'pi pi-objects-column', route: '/production', module: 'production' },
   { label: 'Joyeros', icon: 'pi pi-id-card', route: '/jewelers', module: 'jewelers' },
   { label: 'Vitrina', icon: 'pi pi-star', route: '/vitrina', module: 'inventory' },
