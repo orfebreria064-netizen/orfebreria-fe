@@ -21,6 +21,8 @@ const NAV: NavItem[] = [
   { label: 'Materiales', icon: 'pi pi-box', route: '/materials', module: 'materials' },
   { label: 'Pagos', icon: 'pi pi-wallet', route: '/payments', module: 'payments' },
   { label: 'Entregas', icon: 'pi pi-truck', route: '/deliveries', module: 'deliveries' },
+  { label: 'Finanzas', icon: 'pi pi-calculator', route: '/finanzas', module: 'finance' },
+  { label: 'Tipo de cambio', icon: 'pi pi-dollar', route: '/tipo-cambio', module: 'exchangeRates' },
   { label: 'Reportes', icon: 'pi pi-chart-pie', route: '/reports', module: 'reports' },
   { label: 'Configuración', icon: 'pi pi-cog', route: '/settings', module: 'settings' },
 ];

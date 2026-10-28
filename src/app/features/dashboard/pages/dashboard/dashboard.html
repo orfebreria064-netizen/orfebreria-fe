@@ -1,4 +1,5 @@
 <app-page-header title="Dashboard" [subtitle]="'Hola, ' + auth.userName() + ' · ' + (today | date: 'EEEE d \'de\' MMMM')">
+  <app-market-ticker />
   <p-button label="Actualizar" icon="pi pi-refresh" severity="secondary" [outlined]="true" [loading]="loading()" (onClick)="load()" />
   <p-button label="Nuevo pedido" icon="pi pi-plus" routerLink="/orders/new" />
 </app-page-header>

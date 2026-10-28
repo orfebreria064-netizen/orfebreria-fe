@@ -14,6 +14,7 @@ import { EmptyState } from '../../../../shared/components/empty-state/empty-stat
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
 import { daysUntil } from '../../../../shared/utils/format';
 import { ChartCard, ChartSeries, ChartSummary } from '../../components/chart-card/chart-card';
+import { MarketTicker } from '../../components/market-ticker/market-ticker';
 import { DashboardData, DashboardService } from '../../services/dashboard.service';
 
 /** Paleta categórica validada (CVD y contraste) — ver skill dataviz / docs. */
@@ -35,7 +36,7 @@ const integer = (v: number) => String(Math.round(v));
 
 @Component({
   selector: 'app-dashboard',
-  imports: [DatePipe, RouterLink, ButtonModule, TableModule, SkeletonModule, PageHeader, StatCard, StatusTag, EmptyState, MoneyPipe, ChartCard],
+  imports: [DatePipe, RouterLink, ButtonModule, TableModule, SkeletonModule, PageHeader, StatCard, StatusTag, EmptyState, MoneyPipe, ChartCard, MarketTicker],
   templateUrl: './dashboard.html',
   styleUrl: './dashboard.scss',
 })

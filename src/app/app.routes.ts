@@ -78,6 +78,18 @@ export const routes: Routes = [
         loadChildren: () => import('./features/deliveries/deliveries.routes').then((m) => m.DELIVERIES_ROUTES),
       },
       {
+        path: 'finanzas',
+        data: { breadcrumb: 'Finanzas', roles: MODULE_ROLES.finance },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/finance/finance.routes').then((m) => m.FINANCE_ROUTES),
+      },
+      {
+        path: 'tipo-cambio',
+        data: { breadcrumb: 'Tipo de cambio', roles: MODULE_ROLES.exchangeRates },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/exchange-rates/exchange-rates.routes').then((m) => m.EXCHANGE_RATES_ROUTES),
+      },
+      {
         path: 'reports',
         data: { breadcrumb: 'Reportes', roles: MODULE_ROLES.reports },
         canActivate: [roleGuard],

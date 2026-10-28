@@ -1,6 +1,6 @@
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { TableModule } from 'primeng/table';
 import { TabsModule } from 'primeng/tabs';
@@ -58,6 +58,8 @@ export class MaterialList implements OnInit {
   protected readonly loading = signal(true);
   protected readonly loadingMovements = signal(false);
   protected readonly canWrite = this.auth.hasRole(...MODULE_ROLES.materialsWrite);
+  /** Pestaña inicial (?tab=prices desde el dashboard). */
+  protected readonly initialTab = inject(ActivatedRoute).snapshot.queryParamMap.get('tab') ?? 'stock';
 
   protected readonly typeOptions = MATERIAL_TYPE_OPTIONS;
   protected readonly typeLabels = MATERIAL_TYPE_LABELS;

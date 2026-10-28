@@ -25,6 +25,11 @@ export const MODULE_ROLES = {
   jewelersWrite: ['ADMIN', 'GERENTE', 'SUPERVISOR'],
   /** Recibos de egreso (pagos a joyeros). */
   jewelerPayments: ['ADMIN', 'GERENTE'],
+  /** Tipo de cambio diario (calendario); solo ADMIN y GERENTE lo corrigen. */
+  exchangeRates: ['ADMIN', 'GERENTE', 'VENDEDOR'],
+  exchangeRatesWrite: ['ADMIN', 'GERENTE'],
+  /** Utilidad del mes, gastos y préstamos. */
+  finance: ['ADMIN', 'GERENTE'],
   reports: ['ADMIN', 'GERENTE'],
   settings: ['ADMIN'],
 } as const satisfies Record<string, readonly AppRole[]>;
