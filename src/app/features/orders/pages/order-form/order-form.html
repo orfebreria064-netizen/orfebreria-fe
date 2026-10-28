@@ -85,6 +85,8 @@
         </span>
       </h2>
       <app-items-editor [items]="items" [materials]="materials()" [taxRate]="taxRate()" [currency]="currency()" />
+      <p-button label="Agregar desde la vitrina" icon="pi pi-star" [text]="true" size="small" (onClick)="piecePicker = true" />
+      <app-piece-picker [(visible)]="piecePicker" [currency]="$any(currency())" [exclude]="pickedPieces()" (picked)="addPiece($event)" />
     </section>
 
     <section class="card">

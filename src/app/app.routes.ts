@@ -60,6 +60,12 @@ export const routes: Routes = [
         loadChildren: () => import('./features/jewelers/jewelers.routes').then((m) => m.JEWELERS_ROUTES),
       },
       {
+        path: 'vitrina',
+        data: { breadcrumb: 'Vitrina', roles: MODULE_ROLES.inventory },
+        canActivate: [roleGuard],
+        loadChildren: () => import('./features/inventory/inventory.routes').then((m) => m.INVENTORY_ROUTES),
+      },
+      {
         path: 'materials',
         data: { breadcrumb: 'Materiales', roles: MODULE_ROLES.materials },
         canActivate: [roleGuard],

@@ -10,6 +10,12 @@
 --     Los préstamos no son gasto ni ingreso: se informan aparte.
 -- =====================================================================
 
+-- Numeración: GA (gasto), PR (préstamo), AP (abono de préstamo)
+alter table public.document_sequences drop constraint document_sequences_doc_type_check;
+alter table public.document_sequences
+  add constraint document_sequences_doc_type_check
+  check (doc_type in ('COT', 'PED', 'ENT', 'PRO', 'OP', 'RI', 'RE', 'GA', 'PR', 'AP'));
+
 -- ---------------------------------------------------------------------
 -- Conversión a soles con el TC de la empresa en una fecha
 -- ---------------------------------------------------------------------

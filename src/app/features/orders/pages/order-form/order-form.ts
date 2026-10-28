@@ -20,6 +20,8 @@ import { CustomerPicker } from '../../../customers/components/customer-picker/cu
 import { Material } from '../../../materials/models/material.model';
 import { MaterialsService } from '../../../materials/services/materials.service';
 import { ItemsEditor } from '../../../quotations/components/items-editor/items-editor';
+import { PiecePicker } from '../../../inventory/components/piece-picker/piece-picker';
+import { QuotationItem } from '../../../quotations/models/quotation.model';
 import { ItemFormGroup, createItemGroup, itemsFromArray } from '../../../quotations/components/items-editor/item-form';
 import { OrderHeaderInput } from '../../models/order.model';
 import { OrdersService } from '../../services/orders.service';
@@ -40,6 +42,7 @@ import { OrdersService } from '../../services/orders.service';
     FieldError,
     CustomerPicker,
     ItemsEditor,
+    PiecePicker,
   ],
   templateUrl: './order-form.html',
 })
@@ -136,6 +139,21 @@ export class OrderForm implements OnInit {
 
   protected taxRate(): number {
     return Number(this.form.controls.tax_rate.value ?? 0);
+  }
+
+  protected piecePicker = false;
+
+  /** Joyas y piedras de vitrina ya agregadas al pedido. */
+  protected pickedPieces(): string[] {
+    return this.items.getRawValue().flatMap((i) => [i.product_id, i.gem_id]).filter((x): x is string => !!x);
+  }
+
+  /** Agrega la pieza de vitrina reemplazando la primera línea si está vacía. */
+  protected addPiece(item: Partial<QuotationItem>): void {
+    const first = this.items.at(0);
+    if (this.items.length === 1 && !first.controls.description.value.trim() && !first.controls.unit_price.value) this.items.removeAt(0);
+    this.items.push(createItemGroup(item));
+    if (!this.form.controls.title.value?.trim()) this.form.controls.title.setValue(item.description ?? '');
   }
 
   protected currency(): string {

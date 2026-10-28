@@ -14,6 +14,8 @@ export interface QuotationItem {
   unit_price: number;
   discount: number;
   subtotal?: number;
+  product_id?: string | null;
+  gem_id?: string | null;
 }
 
 export interface Quotation {

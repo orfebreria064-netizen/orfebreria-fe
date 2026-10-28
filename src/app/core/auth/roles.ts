@@ -14,6 +14,9 @@ export const MODULE_ROLES = {
   ordersStatus: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
   production: ['ADMIN', 'GERENTE', 'SUPERVISOR', 'ORFEBRE'],
   productionManage: ['ADMIN', 'GERENTE', 'SUPERVISOR'],
+  /** Vitrina: joyas en stock y piedras registradas. */
+  inventory: ['ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'],
+  inventoryWrite: ['ADMIN', 'GERENTE'],
   materials: ['ADMIN', 'GERENTE', 'SUPERVISOR'],
   materialsWrite: ['ADMIN', 'GERENTE'],
   payments: ['ADMIN', 'GERENTE', 'VENDEDOR'],

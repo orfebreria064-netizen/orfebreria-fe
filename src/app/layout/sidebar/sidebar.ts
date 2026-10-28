@@ -18,6 +18,7 @@ const NAV: NavItem[] = [
   { label: 'Pedidos', icon: 'pi pi-briefcase', route: '/orders', module: 'orders' },
   { label: 'Producción', icon: 'pi pi-objects-column', route: '/production', module: 'production' },
   { label: 'Joyeros', icon: 'pi pi-id-card', route: '/jewelers', module: 'jewelers' },
+  { label: 'Vitrina', icon: 'pi pi-star', route: '/vitrina', module: 'inventory' },
   { label: 'Materiales', icon: 'pi pi-box', route: '/materials', module: 'materials' },
   { label: 'Pagos', icon: 'pi pi-wallet', route: '/payments', module: 'payments' },
   { label: 'Entregas', icon: 'pi pi-truck', route: '/deliveries', module: 'deliveries' },

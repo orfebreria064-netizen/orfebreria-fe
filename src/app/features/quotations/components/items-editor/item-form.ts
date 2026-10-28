@@ -12,6 +12,9 @@ export type ItemFormGroup = FormGroup<{
   weight: FormControl<number | null>;
   unit_price: FormControl<number | null>;
   discount: FormControl<number | null>;
+  /** Joya o piedra de vitrina que se vende en la línea (solo pedidos). */
+  product_id: FormControl<string | null>;
+  gem_id: FormControl<string | null>;
 }>;
 
 export const UNIT_OPTIONS = [
@@ -48,6 +51,8 @@ export function createItemGroup(item?: Partial<QuotationItem>): ItemFormGroup {
         Validators.min(0),
       ]),
       discount: new FormControl(item?.discount != null ? Number(item.discount) : 0, [Validators.min(0)]),
+      product_id: new FormControl(item?.product_id ?? null),
+      gem_id: new FormControl(item?.gem_id ?? null),
     },
     { validators: discountWithinLine },
   ) as ItemFormGroup;
@@ -65,5 +70,7 @@ export function itemsFromArray(array: FormArray<ItemFormGroup>): QuotationItem[]
     weight: v.weight ? Number(v.weight) : null,
     unit_price: Number(v.unit_price ?? 0),
     discount: Number(v.discount ?? 0),
+    product_id: v.product_id,
+    gem_id: v.gem_id,
   }));
 }
