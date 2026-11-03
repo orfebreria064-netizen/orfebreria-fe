@@ -25,7 +25,7 @@ function passwordsMatch(group: AbstractControl): ValidationErrors | null {
   template: `
     <div class="auth-card">
       <div class="auth-brand">
-        <span>Au</span>
+        <img src="brillos-logo.png" alt="BRILLOS" />
         <div>
           <h1>Crear contraseña</h1>
           <p>{{ auth.session()?.user?.email ?? 'Activación de cuenta' }}</p>

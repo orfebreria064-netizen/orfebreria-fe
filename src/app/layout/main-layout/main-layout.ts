@@ -36,13 +36,13 @@ export class MainLayout {
   constructor() {
     const lookups = inject(LookupService);
     const doc = inject(DOCUMENT);
-    // Ícono de la pestaña: el logo de la empresa, o el de Aurum si no tiene
+    // Ícono de la pestaña: el logo de la empresa, o el de BRILLOS si no tiene
     effect(() => {
       const logo = lookups.settings()?.logo;
       const link = doc.querySelector<HTMLLinkElement>('link[rel="icon"]');
       if (!link) return;
-      link.type = logo ? (logo.startsWith('data:image/png') ? 'image/png' : 'image/jpeg') : 'image/x-icon';
-      link.href = logo || 'favicon.ico';
+      link.type = logo && !logo.startsWith('data:image/png') ? 'image/jpeg' : 'image/png';
+      link.href = logo || 'brillos-logo.png';
     });
     const notify = inject(NotifyService);
     lookups.ensureLoaded().catch((err) => notify.error(err, 'No se pudieron cargar los catálogos.'));

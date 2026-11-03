@@ -45,10 +45,10 @@ const NAV: NavItem[] = [
           <small>Gestión</small>
         </div>
       } @else {
-        <span class="brand__mark">Au</span>
+        <img class="brand__logo" src="brillos-logo.png" alt="BRILLOS" />
         <div>
-          <strong>Aurum</strong>
-          <small>Gestión de orfebrería</small>
+          <strong>BRILLOS</strong>
+          <small>Gestión</small>
         </div>
       }
     </div>
@@ -65,7 +65,7 @@ const NAV: NavItem[] = [
 })
 export class Sidebar {
   protected readonly auth = inject(AuthService);
-  /** Marca de la empresa (logo y nombre); mientras cargan los datos se ve la de Aurum. */
+  /** Marca de la empresa (logo y nombre); mientras cargan los datos se ve la de BRILLOS. */
   protected readonly company = inject(LookupService).settings;
   readonly navigate = output<void>();
 

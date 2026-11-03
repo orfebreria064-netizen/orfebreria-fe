@@ -10,7 +10,7 @@ import { AuthService } from '../../../core/auth/auth.service';
   template: `
     <div class="auth-card">
       <div class="auth-brand">
-        <span>Au</span>
+        <img src="brillos-logo.png" alt="BRILLOS" />
         <div>
           <h1>Usuario inactivo</h1>
           <p>{{ auth.session()?.user?.email }}</p>

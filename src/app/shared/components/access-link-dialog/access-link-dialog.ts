@@ -41,7 +41,7 @@ export class AccessLinkDialog {
   readonly visible = model(false);
   readonly result = input<AccessLinkResult | null>(null);
   /** Nombre de la empresa o del sistema para el mensaje de WhatsApp. */
-  readonly appName = input('Aurum');
+  readonly appName = input('BRILLOS');
 
   protected readonly title = computed(() => (this.result()?.kind === 'invite' ? 'Enlace de invitación' : 'Enlace de acceso'));
 
