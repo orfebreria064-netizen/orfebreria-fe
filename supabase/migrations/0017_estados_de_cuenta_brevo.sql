@@ -12,7 +12,7 @@
 --   select vault.create_secret('<api key>', 'brevo_api_key', '...');
 -- =====================================================================
 
-select vault.create_secret('jjcastilloo79@gmail.com', 'mail_sender_email',
+select vault.create_secret('orfebreria064@gmail.com', 'mail_sender_email',
                            'Remitente verificado en Brevo para correos transaccionales')
  where not exists (select 1 from vault.secrets where name = 'mail_sender_email');
 
