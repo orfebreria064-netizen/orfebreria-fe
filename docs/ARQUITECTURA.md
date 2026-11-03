@@ -16,9 +16,9 @@ Supabase
 * **No hay backend propio.** Las reglas que deben cumplirse siempre (totales, saldo, stock, transiciones de estado,
   auditoría, pedido cerrado inmodificable, numeración) viven en PostgreSQL como triggers y funciones. Así se aplican
   igual desde la app, el SQL Editor o integraciones futuras. Angular solo valida para dar una buena experiencia.
-* **Multiempresa desde el día 1:** todas las tablas de negocio llevan `org_id` (por defecto `current_org_id()`) y todas
-  las políticas RLS filtran por organización. El MVP opera con una organización. Para pasar a SaaS basta con
-  agregar el alta de organizaciones e invitaciones; no hay que migrar datos.
+* **Una sola empresa:** todas las tablas de negocio llevan `org_id` (por defecto `current_org_id()`) y todas
+  las políticas RLS filtran por organización, pero la app opera con una sola organización (BRILLOS). La plataforma
+  SaaS que se probó (migraciones 0009–0014) se retiró en la 0022; no hay planes ni suscripción.
 * **Edge Functions:** no se necesitan en el MVP. Se reservan para invitar usuarios (requiere `service_role`),
   WhatsApp y facturación electrónica (SUNAT).
 

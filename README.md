@@ -14,26 +14,17 @@ La arquitectura, el modelo entidad-relación, la matriz RLS y las rutas están e
 
 1. Abra **Supabase → SQL Editor** del proyecto y ejecute el contenido completo de [`supabase/schema.sql`](supabase/schema.sql).
    El archivo crea las tablas, triggers, funciones, políticas RLS y el bucket privado `orders`.
-   - **Proyecto ya en uso (migraciones 0001–0008 aplicadas):** ejecute solo
-     [`supabase/migrations/0009_saas_platform.sql`](supabase/migrations/0009_saas_platform.sql). Las empresas existentes
-     quedan con el plan **Empresa activo por 1 año**, y el primer ADMIN de la primera empresa pasa a ser
-     **superadministrador de la plataforma**.
-   - **Proyecto con 0009 aplicada:** ejecute solo [`supabase/migrations/0010_reports.sql`](supabase/migrations/0010_reports.sql)
-     (funciones de reportes, solo lectura).
+   - **Proyecto ya en uso:** ejecute en orden las migraciones de [`supabase/migrations/`](supabase/migrations/) que falten.
+     La [`0022_sin_saas.sql`](supabase/migrations/0022_sin_saas.sql) retira la plataforma SaaS (planes, suscripciones,
+     solicitudes de acceso y superadministrador) que agregaron las migraciones 0009 a 0014.
 2. Cree el primer usuario: en una base vacía, cree un usuario en *Authentication → Users → Add user* (o con
-   «Invite user»). **El primer usuario crea la organización inicial y queda como ADMIN y superadministrador.**
-   Después de él, el alta es **solo por invitación** (ver *Plataforma SaaS*).
+   «Invite user»). **El primer usuario crea la organización y queda como ADMIN.**
+   Después de él, el alta es **solo por invitación** (ver *Usuarios*).
 3. (Opcional) Ejecute [`supabase/seed.sql`](supabase/seed.sql) en el SQL Editor para cargar los datos demo:
    5 clientes, 5 cotizaciones, 8 pedidos en distintos estados, 6 materiales, pagos, etapas y entregas. Los pedidos
    demo quedan asignados al ADMIN.
 
 `supabase/migrations/` es la fuente del esquema. `schema.sql` se regenera con `npm run db:schema`.
-
-Para cambiar o agregar superadministradores:
-
-```sql
-insert into public.platform_admins (user_id) select id from auth.users where email = 'usted@correo.pe';
-```
 
 ### Configuración de Supabase para la nube
 
@@ -52,24 +43,9 @@ En el panel del proyecto:
    supabase login
    supabase link --project-ref ynxnxdgzsykhobfujyio
    supabase functions deploy send-invitation
-   supabase functions deploy subscription-reminders --no-verify-jwt
    supabase secrets set RESEND_API_KEY=re_xxx MAIL_FROM="Aurum <avisos@su-dominio.pe>" \
      APP_URL=https://su-dominio.pe CRON_SECRET=$(openssl rand -hex 24)
    ```
-
-5. **Avisos diarios de vencimiento**: active las extensiones `pg_cron` y `pg_net` (*Database → Extensions*) y
-   programe la función en el SQL Editor:
-
-   ```sql
-   select cron.schedule('avisos-suscripcion', '0 13 * * *',  -- 08:00 hora de Lima
-     $$ select net.http_post(
-          url := 'https://ynxnxdgzsykhobfujyio.supabase.co/functions/v1/subscription-reminders',
-          headers := jsonb_build_object('Content-Type', 'application/json', 'x-cron-secret', 'EL_MISMO_CRON_SECRET')
-        ) $$);
-   ```
-
-6. Edite [`src/app/core/config/platform.ts`](src/app/core/config/platform.ts) con su correo, WhatsApp e
-   instrucciones de pago reales. Las empresas los ven en *Mi plan* y en los avisos.
 
 ### 2. Frontend
 
@@ -82,50 +58,19 @@ npm run build       # build de producción en dist/
 La URL y la clave **publishable (anon)** de Supabase están en `src/environments/`. Esa clave es pública por diseño:
 la seguridad la aplica RLS. **Nunca** coloque la `service_role` key en el frontend.
 
-## Plataforma SaaS (multiempresa)
+## Usuarios
 
-Cada orfebrería es una **organización** con sus datos aislados por RLS. Usted, como **superadministrador**, gestiona
-todas desde **Plataforma** (menú lateral, solo visible para usted).
+La app es para **una sola orfebrería**. Sus datos están en una organización y RLS los filtra por `org_id`.
+No hay planes ni suscripción mensual (se retiraron en la migración 0022).
 
-**Alta de una empresa**
-
-1. La empresa llena **Solicitar acceso** (`/solicitar-acceso`): empresa, RUC, contacto y plan de interés.
-2. Usted la **aprueba** en *Plataforma → Solicitudes*, elige el plan y los días de prueba (14 por defecto). Esto crea
-   la empresa con sus catálogos iniciales y envía al dueño un correo para crear su contraseña (`/activar-cuenta`).
-3. El dueño entra como **ADMIN** de su empresa e invita a su personal en *Configuración → Usuarios*, hasta el límite
-   de su plan.
-
-**Planes** (editables en *Plataforma → Planes*)
-
-| Plan | Usuarios | Mensual | Anual |
-|---|---|---|---|
-| Básico | 3 | S/ 79 | S/ 790 |
-| Taller | 8 | S/ 149 | S/ 1 490 |
-| Empresa | 20 (+ S/ 15 por usuario extra) | S/ 299 | S/ 2 990 |
-
-Ocupan cupo los usuarios **activos** y las **invitaciones pendientes**; desactivar un usuario libera su cupo.
-
-**Vencimiento**
-
-| Estado | Cuándo | Efecto |
-|---|---|---|
-| Prueba / Activa | hasta la fecha de vencimiento | uso normal; aviso en pantalla 7 días antes |
-| En gracia | 5 días después de vencer (solo planes pagados) | uso normal con aviso |
-| Vencida | después de la gracia | **solo lectura**: puede consultar y exportar, no registrar |
-| Suspendida / Cancelada | la pone usted manualmente | sin acceso a los datos (no se borran) |
-
-**Pagos:** las empresas pagan por Yape, Plin o transferencia y envían la constancia. Usted registra el pago en
-*Plataforma → Empresas → Pago*. Si la empresa está vigente o en gracia, el nuevo periodo continúa desde el
-vencimiento; si está vencida o en prueba, empieza en la fecha de pago. 12 meses usan el precio anual.
-
-Todo lo anterior lo exige **la base de datos** (triggers y RLS), no solo la interfaz: un plan vencido bloquea las
-escrituras incluso desde las funciones RPC, y el límite de usuarios se valida al invitar y al activar.
+El **ADMIN** invita a su personal en *Configuración → Usuarios*. La persona recibe un correo para crear su
+contraseña (`/activar-cuenta`); si el correo no sale, el ADMIN obtiene el enlace para compartirlo por WhatsApp.
+No hay límite de usuarios. Desactivar un usuario le quita el acceso sin borrar su historial.
 
 ## Roles
 
 | Rol | Acceso |
 |---|---|
-| Superadministrador | Panel *Plataforma*: empresas, solicitudes, pagos de suscripción y planes. Es independiente del rol en su propia empresa |
 | ADMIN | Todo, incluida la configuración y la reapertura de pedidos cerrados o cancelados |
 | GERENTE | Dashboard, clientes, cotizaciones, pedidos, producción, materiales, pagos (con anulación), entregas y reportes |
 | VENDEDOR | Clientes, cotizaciones, pedidos, pagos y entregas |
@@ -136,8 +81,7 @@ escrituras incluso desde las funciones RPC, y el límite de usuarios se valida a
 
 Menú **Reportes** (ADMIN y GERENTE). Cada reporte tiene filtros, totales y exportación a **Excel** (ExcelJS) y **PDF**
 (jsPDF); ambas librerías se cargan solo al exportar. Los datos vienen de funciones `report_*`
-([`0010_reports.sql`](supabase/migrations/0010_reports.sql)) que respetan RLS y rechazan a otros roles. Funcionan
-también con el plan vencido (solo lectura).
+([`0010_reports.sql`](supabase/migrations/0010_reports.sql)) que respetan RLS y rechazan a otros roles.
 
 | Reporte | Contenido |
 |---|---|
@@ -169,17 +113,14 @@ también con el plan vencido (solo lectura).
 - Pruebas de RLS por rol (anon, ADMIN, VENDEDOR, ORFEBRE, usuario inactivo) y el flujo de aceptación completo
   de 20 pasos ejecutado como usuarios reales con RLS activo.
 
-- Plataforma SaaS (0009): solicitud anónima, aprobación solo por superadmin, alta por invitación y rechazo de
-  registros sin invitación, aislamiento entre empresas, límite de usuarios (al invitar, al activar y al invitar
-  administrador), prueba → gracia → vencida (solo lectura, también vía RPC y Storage) → suspendida (sin acceso),
-  cálculo de periodos al registrar pagos (vencida, vigente y en gracia), permisos de las RPC (anon, empresa,
-  superadmin, service_role) y la consulta de avisos de vencimiento.
+- Retiro de la plataforma SaaS (0022, 2026-11-03): ensayo con rollback y aplicación en el proyecto Supabase;
+  verificado el acceso de un ADMIN a pedidos, clientes e invitaciones con RLS activo.
 
 **Pendiente de probar en el proyecto Supabase real:** la UI navegando contra la API, la subida de archivos a Storage,
-el envío de emails de Auth y las Edge Functions (`send-invitation`, `subscription-reminders`). Esas partes no se
+el envío de emails de Auth y las Edge Functions (`send-invitation`, `daily-statements`). Esas partes no se
 pudieron ejecutar en local.
 
 ## Fuera del alcance (la arquitectura lo permite)
 
-Cobro automático con pasarela (Culqi, Izipay, Mercado Pago), facturación electrónica SUNAT de las suscripciones,
-POS, compras, WhatsApp automatizado.
+Cobro con pasarela (Culqi, Izipay, Mercado Pago), facturación electrónica SUNAT, POS, compras,
+WhatsApp automatizado.
