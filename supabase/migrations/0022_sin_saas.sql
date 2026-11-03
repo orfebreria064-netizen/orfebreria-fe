@@ -343,7 +343,7 @@ $$;
 revoke execute on function public.handle_new_user() from public, anon, authenticated;
 
 -- ---------------------------------------------------------------------
--- 4. El antiguo superadministrador pasa a ser ADMIN de BRILLOS
+-- 4. El antiguo superadministrador pasa a ser ADMIN de la empresa (BRILLOS)
 -- ---------------------------------------------------------------------
 do $$
 declare
@@ -352,7 +352,9 @@ declare
   v_org   uuid;
 begin
   select id, email into v_user, v_email from auth.users where lower(email) = 'jjcastilloo79@gmail.com';
-  select id into v_org from public.organizations where name ilike '%brillos%' order by created_at limit 1;
+  -- La empresa de la app (BRILLOS): la única organización, o la más antigua si hubiera varias.
+  select id into v_org from public.organizations
+   order by (name ilike '%brillos%') desc, created_at limit 1;
   if v_user is null or v_org is null then
     raise notice 'No se encontró el usuario o la empresa BRILLOS: se omite el alta como ADMIN.';
     return;
