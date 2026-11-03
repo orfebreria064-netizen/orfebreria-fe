@@ -5,7 +5,6 @@ import { SupabaseService } from '../services/supabase.service';
 import { LookupService } from '../services/lookup.service';
 import { Profile } from '../models/profile.model';
 import { AppRole } from '../models/domain';
-import { MySubscription } from '../models/subscription.model';
 import { AppError, unwrap } from '../../shared/utils/db';
 import { isPwnedPassword } from '../../shared/utils/pwned';
 
@@ -18,7 +17,7 @@ const AUTH_MESSAGES: Record<string, string> = {
   'For security purposes, you can only request this after 60 seconds.': 'Por seguridad, espere un minuto antes de solicitar otro enlace.',
 };
 
-/** Sesión, perfil, plan de la empresa y rol de plataforma del usuario actual (signals). */
+/** Sesión y perfil del usuario actual (signals). */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly supabase = inject(SupabaseService).client;
@@ -27,19 +26,11 @@ export class AuthService {
 
   readonly session = signal<Session | null>(null);
   readonly profile = signal<Profile | null>(null);
-  readonly subscription = signal<MySubscription | null>(null);
-  readonly isPlatformAdmin = signal(false);
 
   readonly isAuthenticated = computed(() => this.session() !== null);
-  /** Superadministrador sin empresa: solo administra la plataforma. */
-  readonly isPlatformOnly = computed(() => this.isPlatformAdmin() && this.profile() === null);
-  readonly isActive = computed(() => this.isPlatformOnly() || this.profile()?.active === true);
+  readonly isActive = computed(() => this.profile()?.active === true);
   readonly role = computed<AppRole | null>(() => (this.profile()?.active ? this.profile()!.role : null));
   readonly userName = computed(() => this.profile()?.full_name ?? this.session()?.user.email ?? '');
-  /** Suspendida o cancelada por la plataforma: sin acceso a los datos. */
-  readonly isBlocked = computed(() => ['SUSPENDED', 'CANCELLED'].includes(this.subscription()?.state ?? ''));
-  /** Vencida: solo lectura (lo exige la base de datos). */
-  readonly isReadOnly = computed(() => this.subscription()?.state === 'EXPIRED');
 
   /** Se ejecuta antes del arranque (provideAppInitializer). */
   async init(): Promise<void> {
@@ -65,20 +56,9 @@ export class AuthService {
       this.clearUser();
       return null;
     }
-    const [profile, subscription, platform] = await Promise.all([
-      this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle(),
-      this.supabase.rpc('my_subscription'),
-      this.supabase.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle(),
-    ]);
-    this.subscription.set((unwrap(subscription) as MySubscription | null) ?? null);
-    this.isPlatformAdmin.set(unwrap(platform) !== null);
-    const p = unwrap(profile) as Profile | null;
+    const p = unwrap(await this.supabase.from('profiles').select('*').eq('id', userId).maybeSingle()) as Profile | null;
     this.profile.set(p);
     return p;
-  }
-
-  async refreshSubscription(): Promise<void> {
-    this.subscription.set((unwrap(await this.supabase.rpc('my_subscription')) as MySubscription | null) ?? null);
   }
 
   async signIn(email: string, password: string): Promise<Profile | null> {
@@ -135,8 +115,6 @@ export class AuthService {
 
   private clearUser(): void {
     this.profile.set(null);
-    this.subscription.set(null);
-    this.isPlatformAdmin.set(false);
     this.lookups.reset();
   }
 
@@ -147,7 +125,6 @@ export class AuthService {
 
   /** Página inicial según rol. */
   homeUrl(): string {
-    if (this.isPlatformOnly()) return '/plataforma';
     switch (this.role()) {
       case 'ADMIN':
       case 'GERENTE':

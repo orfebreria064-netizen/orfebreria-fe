@@ -59,20 +59,13 @@ const NAV: NavItem[] = [
           <span>{{ item.label }}</span>
         </a>
       }
-      @if (auth.isPlatformAdmin()) {
-        <span class="nav-section">Administración</span>
-        <a routerLink="/plataforma" routerLinkActive="active" (click)="navigate.emit()">
-          <i class="pi pi-server"></i>
-          <span>Plataforma</span>
-        </a>
-      }
     </nav>
   `,
   styleUrl: './sidebar.scss',
 })
 export class Sidebar {
   protected readonly auth = inject(AuthService);
-  /** Marca de la empresa (logo y nombre); el superadministrador sin empresa ve la de Aurum. */
+  /** Marca de la empresa (logo y nombre); mientras cargan los datos se ve la de Aurum. */
   protected readonly company = inject(LookupService).settings;
   readonly navigate = output<void>();
 

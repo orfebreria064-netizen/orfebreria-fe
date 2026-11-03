@@ -46,7 +46,6 @@ export class Topbar {
   protected readonly passwordVisible = signal(false);
 
   protected readonly roleLabel = computed(() => {
-    if (this.auth.isPlatformOnly()) return 'Administrador de plataforma';
     const role = this.auth.role();
     return role ? ROLE_LABELS[role] : '';
   });

@@ -3,14 +3,12 @@ import { RouterOutlet } from '@angular/router';
 import { DrawerModule } from 'primeng/drawer';
 import { Sidebar } from '../sidebar/sidebar';
 import { Topbar } from '../topbar/topbar';
-import { SubscriptionBanner } from '../subscription-banner/subscription-banner';
 import { LookupService } from '../../core/services/lookup.service';
 import { NotifyService } from '../../core/services/notify.service';
-import { AuthService } from '../../core/auth/auth.service';
 
 @Component({
   selector: 'app-main-layout',
-  imports: [RouterOutlet, DrawerModule, Sidebar, Topbar, SubscriptionBanner],
+  imports: [RouterOutlet, DrawerModule, Sidebar, Topbar],
   template: `
     <!-- Fuera de .shell: su host ocuparía una celda de la grilla y empujaría el contenido -->
     <p-drawer [(visible)]="drawerOpen" position="left" styleClass="app-drawer" [showCloseIcon]="false">
@@ -25,7 +23,6 @@ import { AuthService } from '../../core/auth/auth.service';
       <div class="shell__main">
         <app-topbar (toggleMenu)="drawerOpen.set(true)" />
         <main class="shell__content">
-          <app-subscription-banner />
           <router-outlet />
         </main>
       </div>
@@ -47,8 +44,6 @@ export class MainLayout {
       link.type = logo ? (logo.startsWith('data:image/png') ? 'image/png' : 'image/jpeg') : 'image/x-icon';
       link.href = logo || 'favicon.ico';
     });
-    // El superadministrador no tiene empresa: no hay catálogos que cargar.
-    if (inject(AuthService).isPlatformOnly()) return;
     const notify = inject(NotifyService);
     lookups.ensureLoaded().catch((err) => notify.error(err, 'No se pudieron cargar los catálogos.'));
   }

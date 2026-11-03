@@ -1,6 +1,6 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router, RouterLink } from '@angular/router';
+import { Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { InputTextModule } from 'primeng/inputtext';
 import { PasswordModule } from 'primeng/password';
@@ -10,7 +10,7 @@ import { FieldError } from '../../../shared/components/field-error/field-error';
 
 @Component({
   selector: 'app-login',
-  imports: [ReactiveFormsModule, RouterLink, ButtonModule, InputTextModule, PasswordModule, MessageModule, FieldError],
+  imports: [ReactiveFormsModule, ButtonModule, InputTextModule, PasswordModule, MessageModule, FieldError],
   templateUrl: './login.html',
   styleUrl: '../auth-shell.scss',
 })
@@ -38,8 +38,7 @@ export class Login {
     try {
       const { email, password } = this.form.getRawValue();
       await this.auth.signIn(email.trim(), password);
-      // isActive incluye al superadministrador sin empresa (sin perfil)
-      const url = !this.auth.isActive() ? '/cuenta-pendiente' : this.auth.isBlocked() ? '/cuenta-suspendida' : this.auth.homeUrl();
+      const url = this.auth.isActive() ? this.auth.homeUrl() : '/cuenta-pendiente';
       await this.router.navigateByUrl(url);
     } catch (err) {
       this.error.set(err instanceof Error ? err.message : 'No se pudo iniciar sesión.');

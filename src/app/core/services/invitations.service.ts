@@ -2,7 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { FunctionsHttpError } from '@supabase/supabase-js';
 import { SupabaseService } from './supabase.service';
 import { AppRole } from '../models/domain';
-import { Invitation } from '../models/subscription.model';
+import { Invitation } from '../models/invitation.model';
 import { AppError, unwrap } from '../../shared/utils/db';
 
 /** Resultado de la Edge Function send-invitation. Si el correo no salió, trae el enlace para compartirlo. */
@@ -16,7 +16,7 @@ export interface AccessLinkResult {
 }
 
 /**
- * Invitaciones de usuarios. La base de datos reserva el cupo del plan (create_invitation)
+ * Invitaciones de usuarios. La base de datos registra la invitación (create_invitation)
  * y la Edge Function send-invitation envía el correo con la clave de servicio; si el correo
  * no sale, devuelve el enlace de activación para compartirlo por WhatsApp u otro medio.
  */
@@ -30,7 +30,7 @@ export class InvitationsService {
     ) as Invitation[];
   }
 
-  /** ADMIN de empresa: reserva el cupo y envía el correo (o devuelve el enlace si no sale). */
+  /** ADMIN de empresa: registra la invitación y envía el correo (o devuelve el enlace si no sale). */
   async invite(email: string, fullName: string, role: AppRole): Promise<AccessLinkResult> {
     const id = unwrap(
       await this.db.rpc('create_invitation', { p_email: email, p_full_name: fullName, p_role: role }),
@@ -43,7 +43,7 @@ export class InvitationsService {
     return this.call({ invitation_id: invitationId, link_only: linkOnly }, 'No se pudo enviar la invitación.');
   }
 
-  /** Enlace de acceso (crear nueva contraseña) para un usuario existente. Solo ADMIN de su empresa o superadmin. */
+  /** Enlace de acceso (crear nueva contraseña) para un usuario existente. Solo ADMIN de su empresa. */
   async accessLink(userId: string): Promise<AccessLinkResult> {
     return this.call({ user_id: userId }, 'No se pudo generar el enlace de acceso.');
   }

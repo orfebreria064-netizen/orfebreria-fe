@@ -1,4 +1,4 @@
-<app-page-header title="Configuración" [subtitle]="showPlanTab ? 'Empresa, usuarios, etapas de producción, tipos de servicio y plan' : 'Empresa, usuarios, etapas de producción y tipos de servicio'" />
+<app-page-header title="Configuración" subtitle="Empresa, usuarios, etapas de producción y tipos de servicio" />
 
 <div class="card">
   <p-tabs [value]="initialTab()" [scrollable]="true">
@@ -7,9 +7,6 @@
       <p-tab value="users"><i class="pi pi-users"></i> Usuarios</p-tab>
       <p-tab value="stages"><i class="pi pi-sitemap"></i> Etapas de producción</p-tab>
       <p-tab value="services"><i class="pi pi-tags"></i> Tipos de servicio</p-tab>
-      @if (showPlanTab) {
-        <p-tab value="plan"><i class="pi pi-credit-card"></i> Mi plan</p-tab>
-      }
     </p-tablist>
     <p-tabpanels>
       <!-- Empresa -->
@@ -141,27 +138,10 @@
 
       <!-- Usuarios -->
       <p-tabpanel value="users">
-        @if (auth.subscription(); as sub) {
-          <div class="seats">
-            <div class="seats__info">
-              <strong>{{ sub.seats_used }} de {{ sub.seat_limit }} usuarios</strong>
-              <span class="muted small">Plan {{ sub.plan_name }} · cuentan los usuarios activos y las invitaciones pendientes</span>
-              <p-progressbar [value]="seatPct()" [showValue]="false" styleClass="seats__bar" [attr.aria-label]="'Cupos usados: ' + seatPct() + '%'" />
-            </div>
-            <p-button label="Invitar usuario" icon="pi pi-user-plus" [disabled]="seatsFull() || auth.isReadOnly()" (onClick)="openInvite()" />
-          </div>
-          @if (seatsFull()) {
-            <p-message severity="warn" styleClass="mb-3">
-              Alcanzó el límite de su plan. Desactive un usuario o
-              @if (showPlanTab) {
-                <a routerLink="/settings" [queryParams]="{ tab: 'plan' }">mejore su plan</a>
-              } @else {
-                mejore su plan
-              }
-              para invitar a más personas.
-            </p-message>
-          }
-        }
+        <div class="users-head">
+          <span class="muted small">Cada persona entra con su propio correo. Las invitaciones vencidas se pueden reenviar.</span>
+          <p-button label="Invitar usuario" icon="pi pi-user-plus" (onClick)="openInvite()" />
+        </div>
 
         @if (invitations().length) {
           <h3 class="section-title">Invitaciones pendientes</h3>
@@ -280,95 +260,6 @@
           <p-button label="Agregar" icon="pi pi-plus" [disabled]="!newServiceName.trim()" (onClick)="addServiceType()" />
         </div>
       </p-tabpanel>
-
-      <!-- Mi plan -->
-      @if (showPlanTab) {
-      <p-tabpanel value="plan">
-        @if (auth.subscription(); as sub) {
-          <div class="plan-grid">
-            <section class="plan-box">
-              <span class="muted small">Plan actual</span>
-              <div class="plan-box__head">
-                <strong class="plan-box__name">{{ sub.plan_name }}</strong>
-                <p-tag [value]="stateLabels[sub.state]" [severity]="stateSeverity[sub.state]" />
-              </div>
-              <dl class="plan-facts">
-                <div>
-                  <dt>{{ sub.state === 'TRIAL' ? 'Prueba hasta' : 'Vigente hasta' }}</dt>
-                  <dd>{{ sub.current_period_end | date: 'dd/MM/yyyy' }}</dd>
-                </div>
-                <div>
-                  <dt>{{ sub.days_left >= 0 ? 'Días restantes' : 'Días vencido' }}</dt>
-                  <dd [class.text-danger]="sub.days_left < 0">{{ sub.days_left >= 0 ? sub.days_left : -sub.days_left }}</dd>
-                </div>
-                <div>
-                  <dt>Usuarios</dt>
-                  <dd>{{ sub.seats_used }} / {{ sub.seat_limit }}</dd>
-                </div>
-              </dl>
-              @if (sub.state === 'GRACE') {
-                <p-message severity="warn" text="Su plan venció. Puede seguir trabajando hasta el {{ sub.grace_end | date: 'dd/MM/yyyy' }}; luego el sistema quedará en solo lectura." />
-              } @else if (sub.state === 'EXPIRED') {
-                <p-message severity="error" text="Plan vencido: el sistema está en modo solo lectura hasta registrar su pago." />
-              }
-            </section>
-
-            <section class="plan-box">
-              <span class="muted small">Cómo renovar o cambiar de plan</span>
-              <ol class="pay-steps">
-                @for (line of platform.paymentInstructions; track line) {
-                  <li>{{ line }}</li>
-                }
-              </ol>
-              <p class="muted small">Su plan se activa o extiende cuando confirmamos el pago (normalmente el mismo día).</p>
-              <a class="p-button p-component p-button-outlined" [href]="whatsappPay()" target="_blank" rel="noopener">
-                <i class="pi pi-whatsapp"></i>&nbsp; Enviar constancia por WhatsApp
-              </a>
-            </section>
-          </div>
-
-          <h3 class="section-title">Planes disponibles</h3>
-          <p-table [value]="plans()" [scrollable]="true" [tableStyle]="{ 'min-width': '560px' }" size="small">
-            <ng-template #header>
-              <tr><th>Plan</th><th class="text-right">Usuarios</th><th class="text-right">Mensual</th><th class="text-right">Anual</th><th>Usuario adicional</th></tr>
-            </ng-template>
-            <ng-template #body let-p>
-              <tr [class.plan-current]="p.code === sub.plan_code">
-                <td class="strong">
-                  {{ p.name }}
-                  @if (p.code === sub.plan_code) {
-                    <p-tag value="Actual" severity="contrast" />
-                  }
-                </td>
-                <td class="text-right">hasta {{ p.max_users }}</td>
-                <td class="text-right mono">{{ p.price_month | money }}</td>
-                <td class="text-right mono">{{ p.price_year | money }} <small class="muted">(2 meses gratis)</small></td>
-                <td>{{ p.extra_user_price ? (p.extra_user_price | money) + ' / mes' : '—' }}</td>
-              </tr>
-            </ng-template>
-          </p-table>
-
-          <h3 class="section-title">Historial de pagos</h3>
-          <p-table [value]="payments()" [scrollable]="true" [tableStyle]="{ 'min-width': '620px' }" size="small">
-            <ng-template #header>
-              <tr><th>Fecha</th><th>Plan</th><th>Periodo</th><th>Medio</th><th class="text-right">Monto</th></tr>
-            </ng-template>
-            <ng-template #body let-pay>
-              <tr>
-                <td class="nowrap">{{ pay.paid_at | date: 'dd/MM/yyyy' }}</td>
-                <td>{{ pay.plan_code }} · {{ pay.months }} {{ pay.months === 1 ? 'mes' : 'meses' }}</td>
-                <td class="nowrap">{{ pay.period_start | date: 'dd/MM/yy' }} – {{ pay.period_end | date: 'dd/MM/yy' }}</td>
-                <td>{{ methodLabel(pay.method) }}</td>
-                <td class="text-right mono">{{ pay.amount | money }}</td>
-              </tr>
-            </ng-template>
-            <ng-template #emptymessage>
-              <tr><td colspan="5" class="muted">Aún no hay pagos registrados.</td></tr>
-            </ng-template>
-          </p-table>
-        }
-      </p-tabpanel>
-      }
     </p-tabpanels>
   </p-tabs>
 </div>
@@ -390,7 +281,7 @@
       <p-select inputId="inv-role" [options]="roleOptions" formControlName="role" optionLabel="label" optionValue="value" appendTo="body" />
     </div>
     <p class="muted small field--full" style="margin: 0">
-      Recibirá un correo con un enlace para crear su contraseña. Mientras no lo use, la invitación ocupa un cupo del plan.
+      Recibirá un correo con un enlace para crear su contraseña.
     </p>
     <div class="form-actions field--full">
       <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="inviteVisible = false" />

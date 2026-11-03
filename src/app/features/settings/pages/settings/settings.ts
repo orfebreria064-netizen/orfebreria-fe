@@ -1,7 +1,6 @@
 import { Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
 import { TabsModule } from 'primeng/tabs';
 import { TableModule } from 'primeng/table';
@@ -17,7 +16,6 @@ import { AccessLinkDialog } from '../../../../shared/components/access-link-dial
 import { AccessLinkResult } from '../../../../core/services/invitations.service';
 import { MessageModule } from 'primeng/message';
 import { DialogModule } from 'primeng/dialog';
-import { ProgressBarModule } from 'primeng/progressbar';
 import { AuthService } from '../../../../core/auth/auth.service';
 import { AppRole, ROLE_LABELS, ROLE_OPTIONS } from '../../../../core/models/domain';
 import { ProductionStageTemplate, ServiceType, StatementSend } from '../../../../core/models/catalog.model';
@@ -25,30 +23,18 @@ import { Profile } from '../../../../core/models/profile.model';
 import { LookupService } from '../../../../core/services/lookup.service';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { InvitationsService } from '../../../../core/services/invitations.service';
-import {
-  ACCESS_STATE_LABELS,
-  ACCESS_STATE_SEVERITY,
-  Invitation,
-  Plan,
-  SAAS_PAYMENT_METHOD_LABELS,
-  SubscriptionPayment,
-} from '../../../../core/models/subscription.model';
-import { PLATFORM, SHOW_PLAN_TAB, whatsappLink } from '../../../../core/config/platform';
-import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
+import { Invitation } from '../../../../core/models/invitation.model';
 import { PageHeader } from '../../../../shared/components/page-header/page-header';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { phoneValidator } from '../../../../shared/utils/validators';
 import { SettingsService } from '../../services/settings.service';
 
-/** Configuración: empresa, usuarios (invitaciones y cupos del plan), etapas, tipos de servicio y Mi plan. */
+/** Configuración: empresa, usuarios (invitaciones), etapas y tipos de servicio. */
 @Component({
   selector: 'app-settings',
   imports: [
     DatePipe,
-    MoneyPipe,
-    RouterLink,
     DialogModule,
-    ProgressBarModule,
     FormsModule,
     ReactiveFormsModule,
     ButtonModule,
@@ -77,34 +63,11 @@ export class Settings implements OnInit {
   private readonly invitationsService = inject(InvitationsService);
   protected readonly auth = inject(AuthService);
 
-  /** Pestaña inicial (?tab=plan desde el aviso de vencimiento). */
+  /** Pestaña inicial (?tab=users, etc.). */
   readonly tab = input<string>();
-
-  protected readonly showPlanTab = SHOW_PLAN_TAB;
-  /** Si la pestaña pedida está oculta (p. ej. ?tab=plan), se abre Empresa. */
-  protected readonly initialTab = computed(() => {
-    const t = this.tab();
-    return !t || (t === 'plan' && !SHOW_PLAN_TAB) ? 'company' : t;
-  });
+  protected readonly initialTab = computed(() => this.tab() || 'company');
 
   protected readonly invitations = signal<Invitation[]>([]);
-  protected readonly plans = signal<Plan[]>([]);
-  protected readonly payments = signal<SubscriptionPayment[]>([]);
-  protected readonly stateLabels = ACCESS_STATE_LABELS;
-  protected readonly stateSeverity = ACCESS_STATE_SEVERITY;
-  protected readonly methodLabels = SAAS_PAYMENT_METHOD_LABELS;
-  protected readonly platform = PLATFORM;
-  protected readonly seatsFull = computed(() => {
-    const s = this.auth.subscription();
-    return !!s && s.seats_used >= s.seat_limit;
-  });
-  protected readonly seatPct = computed(() => {
-    const s = this.auth.subscription();
-    return s ? Math.min(100, Math.round((s.seats_used / s.seat_limit) * 100)) : 0;
-  });
-  protected readonly whatsappPay = computed(() =>
-    whatsappLink(`Hola, envío la constancia de pago del plan de ${this.lookups.settings()?.company_name ?? 'mi empresa'}.`),
-  );
 
   protected inviteVisible = false;
   protected readonly inviting = signal(false);
@@ -175,18 +138,13 @@ export class Settings implements OnInit {
       }
       this.stages.set(this.lookups.stageTemplates());
       this.serviceTypes.set(this.lookups.serviceTypes());
-      const [users, invitations, plans, payments, sends] = await Promise.all([
+      const [users, invitations, sends] = await Promise.all([
         this.service.users(),
         this.invitationsService.list(),
-        this.service.plans(),
-        this.service.subscriptionPayments(),
         this.service.statementSends(),
-        this.auth.refreshSubscription(),
       ]);
       this.users.set(users);
       this.invitations.set(invitations);
-      this.plans.set(plans);
-      this.payments.set(payments);
       this.statementSends.set(sends);
     } catch (err) {
       this.notify.error(err, 'No se pudo cargar la configuración.');
@@ -264,10 +222,6 @@ export class Settings implements OnInit {
     return this.roleLabels[role] ?? role;
   }
 
-  protected methodLabel(method: SubscriptionPayment['method']): string {
-    return this.methodLabels[method] ?? method;
-  }
-
   protected openInvite(): void {
     this.inviteForm.reset({ full_name: '', email: '', role: 'VENDEDOR' });
     this.inviteVisible = true;
@@ -335,7 +289,6 @@ export class Settings implements OnInit {
     const [users, invitations] = await Promise.all([
       this.service.users(),
       this.invitationsService.list(),
-      this.auth.refreshSubscription(),
     ]);
     this.users.set(users);
     this.invitations.set(invitations);

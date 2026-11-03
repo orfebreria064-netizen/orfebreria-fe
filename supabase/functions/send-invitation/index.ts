@@ -4,7 +4,7 @@
 //     y lo devuelve para que el ADMIN lo comparta (WhatsApp, etc.).
 //     Con link_only = true no intenta el correo.
 //   * { user_id, redirect_to }: enlace de acceso (crear nueva contraseña) para un usuario existente.
-// Autorización con el JWT de quien llama: superadmin, o ADMIN de la empresa de la invitación/usuario.
+// Autorización con el JWT de quien llama: ADMIN de la empresa de la invitación/usuario.
 // Las operaciones de auth.admin usan la clave de servicio, que nunca sale del servidor.
 // El enlace es personal y de un solo uso: solo se devuelve a quien tiene permiso.
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4';
@@ -50,16 +50,13 @@ Deno.serve(async (req) => {
     if (typeof user_id === 'string') {
       const { data: me } = await caller.auth.getUser();
       if (!me.user) return json({ error: 'Sesión no válida.' }, 401);
-      const { data: isPlatformAdmin } = await caller.rpc('is_platform_admin');
-      if (isPlatformAdmin !== true) {
-        // RLS: solo se ven los perfiles de la propia empresa
-        const [{ data: mine }, { data: target }] = await Promise.all([
-          caller.from('profiles').select('org_id, role, active').eq('id', me.user.id).maybeSingle(),
-          caller.from('profiles').select('org_id').eq('id', user_id).maybeSingle(),
-        ]);
-        if (!mine || mine.role !== 'ADMIN' || !mine.active || !target || target.org_id !== mine.org_id) {
-          return json({ error: 'Solo un administrador de la empresa puede generar el enlace de acceso.' }, 403);
-        }
+      // RLS: solo se ven los perfiles de la propia empresa
+      const [{ data: mine }, { data: target }] = await Promise.all([
+        caller.from('profiles').select('org_id, role, active').eq('id', me.user.id).maybeSingle(),
+        caller.from('profiles').select('org_id').eq('id', user_id).maybeSingle(),
+      ]);
+      if (!mine || mine.role !== 'ADMIN' || !mine.active || !target || target.org_id !== mine.org_id) {
+        return json({ error: 'Solo un administrador de la empresa puede generar el enlace de acceso.' }, 403);
       }
       const { data: u, error: userError } = await admin.auth.admin.getUserById(user_id);
       if (userError || !u.user?.email) return json({ error: 'Usuario no encontrado.' }, 404);

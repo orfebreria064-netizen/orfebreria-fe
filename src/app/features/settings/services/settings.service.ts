@@ -3,7 +3,6 @@ import { SupabaseService } from '../../../core/services/supabase.service';
 import { AppRole } from '../../../core/models/domain';
 import { CompanySettings, ProductionStageTemplate, ServiceType, StatementSend } from '../../../core/models/catalog.model';
 import { Profile } from '../../../core/models/profile.model';
-import { Plan, SubscriptionPayment } from '../../../core/models/subscription.model';
 import { emptyToNull, unwrap } from '../../../shared/utils/db';
 
 /** Configuración (solo ADMIN escribe; lo exige RLS). */
@@ -34,14 +33,6 @@ export class SettingsService {
     unwrap(await this.db.from('profiles').update(patch).eq('id', id));
   }
 
-  async plans(): Promise<Plan[]> {
-    return unwrap(await this.db.from('plans').select('*').eq('active', true).order('position')) as Plan[];
-  }
-
-  /** Pagos de suscripción de la empresa (RLS: solo ADMIN). */
-  async subscriptionPayments(): Promise<SubscriptionPayment[]> {
-    return unwrap(await this.db.from('subscription_payments').select('*').order('paid_at', { ascending: false })) as SubscriptionPayment[];
-  }
 
   async saveStage(stage: Partial<ProductionStageTemplate> & { name: string; position: number }): Promise<void> {
     const { id, ...data } = stage;
