@@ -1,19 +1,24 @@
-// Login en dos paneles: marca (oscuro, tono del logo) y formulario.
-// En pantallas angostas la marca pasa a ser una franja superior.
+// Login: tarjeta centrada con dos paneles, marca (oscuro, tono del logo) y formulario.
+// El fondo de la página es el de auth-shell. En pantallas angostas la marca pasa a ser
+// una franja superior de la tarjeta.
 
 :host {
-  display: block;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 0;
-  background: var(--p-surface-0);
+  padding: 1.5rem;
 }
 
 .login {
   display: grid;
-  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-  min-height: 100vh;
-  min-height: 100dvh;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  width: 100%;
+  max-width: 920px;
+  min-height: 480px;
+  overflow: hidden;
+  border: 1px solid var(--p-surface-200);
+  border-radius: 1.25rem;
+  background: var(--p-surface-0);
+  box-shadow:
+    0 1px 2px rgba(31, 36, 48, 0.04),
+    0 24px 60px -12px rgba(31, 36, 48, 0.18);
 }
 
 // ------------------------------------------------------------------ Marca
@@ -23,8 +28,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.75rem;
-  padding: 3rem 2rem;
+  gap: 1.5rem;
+  padding: 2.5rem 2rem 3.5rem;
   overflow: hidden;
   color: #e9e4d8;
   text-align: center;
@@ -46,13 +51,13 @@
   }
 
   &::before {
-    width: 420px;
-    height: 420px;
+    width: 300px;
+    height: 300px;
   }
 
   &::after {
-    width: 620px;
-    height: 620px;
+    width: 450px;
+    height: 450px;
     border-color: rgba(201, 163, 82, 0.07);
   }
 }
@@ -60,20 +65,20 @@
 .hero__logo {
   position: relative;
   z-index: 1;
-  width: 190px;
-  height: 190px;
+  width: 150px;
+  height: 150px;
   border-radius: 50%;
   object-fit: cover;
   box-shadow:
     0 0 0 1px rgba(201, 163, 82, 0.35),
-    0 0 0 10px rgba(201, 163, 82, 0.06),
-    0 24px 60px rgba(0, 0, 0, 0.55);
+    0 0 0 8px rgba(201, 163, 82, 0.06),
+    0 18px 44px rgba(0, 0, 0, 0.55);
 }
 
 .hero__text {
   position: relative;
   z-index: 1;
-  max-width: 22rem;
+  max-width: 18rem;
 
   p {
     margin: 0;
@@ -94,7 +99,7 @@
 
 .hero__footer {
   position: absolute;
-  bottom: 1.5rem;
+  bottom: 1.25rem;
   left: 0;
   right: 0;
   margin: 0;
@@ -108,16 +113,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 3rem 2rem;
+  padding: 2.75rem 3rem;
 }
 
 .panel__inner {
   width: 100%;
-  max-width: 380px;
+  max-width: 360px;
 }
 
 .panel__head {
-  margin-bottom: 2rem;
+  margin-bottom: 1.75rem;
 
   h1 {
     margin: 0 0 0.4rem;
@@ -178,7 +183,7 @@ label {
 }
 
 .panel__footer {
-  margin-top: 2.5rem;
+  margin-top: 2rem;
   padding-top: 1.25rem;
   border-top: 1px solid var(--p-surface-100);
   font-size: 0.8rem;
@@ -188,10 +193,16 @@ label {
 }
 
 // ------------------------------------------------------------------ Responsive
-@media (max-width: 899px) {
+@media (max-width: 767px) {
+  :host {
+    padding: 1rem;
+  }
+
   .login {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
+    min-height: 0;
+    border-radius: 1rem;
   }
 
   .hero {
@@ -222,8 +233,7 @@ label {
   }
 
   .panel {
-    align-items: flex-start;
-    padding: 2rem 1.25rem 2.5rem;
+    padding: 1.75rem 1.25rem 2rem;
   }
 
   .panel__head h1 {
