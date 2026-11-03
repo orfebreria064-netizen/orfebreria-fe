@@ -12,12 +12,13 @@ import { FieldError } from '../../../shared/components/field-error/field-error';
   selector: 'app-login',
   imports: [ReactiveFormsModule, ButtonModule, InputTextModule, PasswordModule, MessageModule, FieldError],
   templateUrl: './login.html',
-  styleUrl: '../auth-shell.scss',
+  styleUrls: ['../auth-shell.scss', './login.scss'],
 })
 export class Login {
   private readonly auth = inject(AuthService);
   private readonly router = inject(Router);
 
+  protected readonly year = new Date().getFullYear();
   protected readonly loading = signal(false);
   protected readonly error = signal<string | null>(null);
   protected readonly mode = signal<'login' | 'reset'>('login');

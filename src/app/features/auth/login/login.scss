@@ -1,0 +1,232 @@
+// Login en dos paneles: marca (oscuro, tono del logo) y formulario.
+// En pantallas angostas la marca pasa a ser una franja superior.
+
+:host {
+  display: block;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 0;
+  background: var(--p-surface-0);
+}
+
+.login {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+// ------------------------------------------------------------------ Marca
+.hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.75rem;
+  padding: 3rem 2rem;
+  overflow: hidden;
+  color: #e9e4d8;
+  text-align: center;
+  background:
+    radial-gradient(ellipse at 50% 42%, rgba(201, 163, 82, 0.16), transparent 58%),
+    linear-gradient(160deg, #1b1e27 0%, #12141a 100%);
+
+  // Anillos dorados de fondo, eco del logo
+  &::before,
+  &::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 42%;
+    border-radius: 50%;
+    border: 1px solid rgba(201, 163, 82, 0.14);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+
+  &::before {
+    width: 420px;
+    height: 420px;
+  }
+
+  &::after {
+    width: 620px;
+    height: 620px;
+    border-color: rgba(201, 163, 82, 0.07);
+  }
+}
+
+.hero__logo {
+  position: relative;
+  z-index: 1;
+  width: 190px;
+  height: 190px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow:
+    0 0 0 1px rgba(201, 163, 82, 0.35),
+    0 0 0 10px rgba(201, 163, 82, 0.06),
+    0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.hero__text {
+  position: relative;
+  z-index: 1;
+  max-width: 22rem;
+
+  p {
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #a9a497;
+  }
+}
+
+.hero__rule {
+  display: block;
+  width: 48px;
+  height: 2px;
+  margin: 0 auto 1rem;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--p-primary-300), var(--p-primary-500));
+}
+
+.hero__footer {
+  position: absolute;
+  bottom: 1.5rem;
+  left: 0;
+  right: 0;
+  margin: 0;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  color: #6f6b62;
+}
+
+// ------------------------------------------------------------------ Formulario
+.panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 2rem;
+}
+
+.panel__inner {
+  width: 100%;
+  max-width: 380px;
+}
+
+.panel__head {
+  margin-bottom: 2rem;
+
+  h1 {
+    margin: 0 0 0.4rem;
+    font-size: 1.75rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    color: var(--p-surface-900);
+  }
+
+  p {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--p-surface-500);
+  }
+}
+
+form {
+  gap: 1.25rem;
+  margin-top: 0;
+}
+
+label {
+  font-weight: 550;
+  color: var(--p-surface-700);
+}
+
+// Campos y botón más altos y cómodos
+:host ::ng-deep {
+  .p-inputtext {
+    height: 2.875rem;
+    padding-inline: 0.9rem;
+    border-radius: 0.6rem;
+  }
+
+  .p-button {
+    height: 2.875rem;
+    margin-top: 0.5rem;
+    border-radius: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .p-message {
+    margin-bottom: 1.25rem;
+  }
+}
+
+.link-button {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
+.panel__note {
+  margin: 0 0 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--p-surface-500);
+}
+
+.panel__footer {
+  margin-top: 2.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--p-surface-100);
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--p-surface-400);
+  text-align: center;
+}
+
+// ------------------------------------------------------------------ Responsive
+@media (max-width: 899px) {
+  .login {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .hero {
+    flex-direction: row;
+    gap: 1rem;
+    padding: 1.5rem 1.25rem;
+    text-align: left;
+
+    &::before,
+    &::after {
+      display: none;
+    }
+  }
+
+  .hero__logo {
+    width: 64px;
+    height: 64px;
+    box-shadow: 0 0 0 1px rgba(201, 163, 82, 0.35);
+  }
+
+  .hero__rule,
+  .hero__footer {
+    display: none;
+  }
+
+  .hero__text p {
+    font-size: 0.85rem;
+  }
+
+  .panel {
+    align-items: flex-start;
+    padding: 2rem 1.25rem 2.5rem;
+  }
+
+  .panel__head h1 {
+    font-size: 1.5rem;
+  }
+}
