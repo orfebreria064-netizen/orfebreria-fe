@@ -371,6 +371,63 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------
+-- 4b. Se elimina la empresa vacía "Casbernet" (pedido del 2026-11-03).
+--     Solo si no tiene usuarios ni datos de negocio; si los tiene, no se borra.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_org    uuid;
+  v_tables text[];
+  v_left   text[];
+  v_pass   integer := 0;
+  t        text;
+  n        bigint;
+begin
+  select id into v_org from public.organizations where name ilike 'casbernet%';
+  if v_org is null then
+    raise notice 'No existe la empresa Casbernet.';
+    return;
+  end if;
+
+  foreach t in array array['profiles', 'customers', 'quotations', 'orders', 'payments'] loop
+    execute format('select count(*) from public.%I where org_id = $1', t) into n using v_org;
+    if n > 0 then
+      raise notice 'Casbernet tiene % fila(s) en %: no se borra.', n, t;
+      return;
+    end if;
+  end loop;
+
+  -- Tablas con org_id (catálogos sembrados, correlativos, sucursales, etc.)
+  select array_agg(c.table_name::text) into v_tables
+    from information_schema.columns c
+    join information_schema.tables tb on tb.table_schema = c.table_schema and tb.table_name = c.table_name
+   where c.table_schema = 'public' and c.column_name = 'org_id' and tb.table_type = 'BASE TABLE';
+
+  -- Varias pasadas: el orden entre tablas depende de sus propias FK.
+  loop
+    v_pass := v_pass + 1;
+    v_left := array[]::text[];
+    foreach t in array v_tables loop
+      begin
+        execute format('delete from public.%I where org_id = $1', t) using v_org;
+      exception when foreign_key_violation or raise_exception then
+        v_left := v_left || t;
+      end;
+    end loop;
+    exit when cardinality(v_left) = 0 or v_pass >= 10;
+    v_tables := v_left;
+  end loop;
+
+  if cardinality(v_left) > 0 then
+    raise exception 'No se pudo vaciar Casbernet; quedan datos en: %', array_to_string(v_left, ', ');
+  end if;
+
+  delete from public.organizations where id = v_org;
+  raise notice 'Empresa Casbernet eliminada.';
+end;
+$$;
+
+-- ---------------------------------------------------------------------
 -- 5. Objetos de la plataforma SaaS (primero las tablas: sus políticas usan las funciones)
 -- ---------------------------------------------------------------------
 drop table if exists public.subscription_payments;
