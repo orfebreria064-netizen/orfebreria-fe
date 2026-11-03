@@ -43,8 +43,9 @@ En el panel del proyecto:
    supabase login
    supabase link --project-ref ynxnxdgzsykhobfujyio
    supabase functions deploy send-invitation
-   supabase secrets set RESEND_API_KEY=re_xxx MAIL_FROM="Aurum <avisos@su-dominio.pe>" \
-     APP_URL=https://su-dominio.pe CRON_SECRET=$(openssl rand -hex 24)
+   supabase functions deploy daily-statements
+   # Respaldo de correo para daily-statements (opcional)
+   supabase secrets set RESEND_API_KEY=re_xxx MAIL_FROM="Aurum <avisos@su-dominio.pe>"
    ```
 
 ### 2. Frontend
