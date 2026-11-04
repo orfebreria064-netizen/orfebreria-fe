@@ -51,6 +51,15 @@ export function todayIso(): string {
   return toIsoDate(new Date())!;
 }
 
+/**
+ * Fin del día de hoy, para `[maxDate]` de p-datepicker. Con `new Date()` el valor por defecto del
+ * formulario (otro `new Date()` creado milisegundos después) queda "en el futuro" y el campo se ve vacío.
+ */
+export function endOfToday(): Date {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999);
+}
+
 /** Normaliza strings vacíos a null antes de enviar a la base de datos. */
 export function emptyToNull<T extends object>(obj: T): T {
   const out: Record<string, unknown> = {};

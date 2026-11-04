@@ -17,7 +17,7 @@ import { EmptyState } from '../../../../shared/components/empty-state/empty-stat
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { LabelPipe } from '../../../../shared/pipes/label.pipe';
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
-import { fromIsoDate, toIsoDate } from '../../../../shared/utils/db';
+import { endOfToday, fromIsoDate, toIsoDate } from '../../../../shared/utils/db';
 import { positiveValidator } from '../../../../shared/utils/validators';
 import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCategory, FinanceService } from '../../services/finance.service';
 
@@ -170,7 +170,7 @@ export class ExpenseList implements OnInit {
   protected readonly methods = PAYMENT_METHOD_OPTIONS;
   protected readonly methodLabels = PAYMENT_METHOD_LABELS;
   protected readonly currencies = CURRENCY_OPTIONS;
-  protected readonly today = new Date();
+  protected readonly today = endOfToday();
 
   protected range: Date[] | null = [new Date(this.today.getFullYear(), this.today.getMonth(), 1), this.today];
   protected category: ExpenseCategory | null = null;

@@ -20,7 +20,7 @@ import { EmptyState } from '../../../../shared/components/empty-state/empty-stat
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { LabelPipe } from '../../../../shared/pipes/label.pipe';
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
-import { toIsoDate } from '../../../../shared/utils/db';
+import { endOfToday, toIsoDate } from '../../../../shared/utils/db';
 import { positiveValidator } from '../../../../shared/utils/validators';
 import { Jeweler } from '../../../jewelers/models/jeweler.model';
 import { JewelersService } from '../../../jewelers/services/jewelers.service';
@@ -261,7 +261,7 @@ export class LoanList implements OnInit {
   private readonly lookup = inject(LookupService);
   private readonly notify = inject(NotifyService);
 
-  protected readonly today = new Date();
+  protected readonly today = endOfToday();
   protected readonly methods = PAYMENT_METHOD_OPTIONS;
   protected readonly paymentLabels = PAYMENT_METHOD_LABELS;
   protected readonly loanMethodLabels = LOAN_PAYMENT_METHOD_LABELS;

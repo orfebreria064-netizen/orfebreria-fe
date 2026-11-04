@@ -1,0 +1,77 @@
+{
+  "customers": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "materials": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "jewelers": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "quotations": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "orders": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "production": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "payments": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "deliveries": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "reparaciones": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "vitrina": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "finanzas": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "settings": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "tipo-cambio": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "dashboard": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  },
+  "reports": {
+    "pdf": true,
+    "version": "2026-11-04",
+    "video": true
+  }
+}

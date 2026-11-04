@@ -169,7 +169,8 @@ export class MaterialPrices implements OnInit {
     return ((Number(r.price) - Number(r.previous_price)) / Number(r.previous_price)) * 100;
   }
 
-  protected async load(): Promise<void> {
+  /** Público: la lista de materiales lo llama al crear o editar un material. */
+  async load(): Promise<void> {
     this.loading.set(true);
     try {
       this.rows.set(await this.service.currentPrices());

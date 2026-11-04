@@ -85,5 +85,5 @@
   </p-tabs>
 </div>
 
-<app-material-dialog [(visible)]="materialDialog" [material]="editing()" (saved)="load()" />
+<app-material-dialog [(visible)]="materialDialog" [material]="editing()" (saved)="afterMaterialSaved()" />
 <app-movement-dialog [(visible)]="movementDialog" (saved)="afterMovement()" />

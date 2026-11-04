@@ -13,7 +13,7 @@ import { PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/d
 import { NotifyService } from '../../../../core/services/notify.service';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
-import { toIsoDate } from '../../../../shared/utils/db';
+import { endOfToday, toIsoDate } from '../../../../shared/utils/db';
 import { positiveValidator } from '../../../../shared/utils/validators';
 import { Order, OrderRow } from '../../../orders/models/order.model';
 import { OrderPicker } from '../../../orders/components/order-picker/order-picker';
@@ -57,7 +57,7 @@ export class PaymentDialog {
   protected readonly order = signal<OrderAmounts | null>(null);
   protected readonly saving = signal(false);
   protected readonly methods = PAYMENT_METHOD_OPTIONS;
-  protected readonly today = new Date();
+  protected readonly today = endOfToday();
 
   protected readonly form = inject(FormBuilder).group({
     order_id: [null as string | null, Validators.required],

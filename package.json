@@ -7,7 +7,9 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "db:schema": "node scripts/build-schema.mjs"
+    "db:schema": "node scripts/build-schema.mjs",
+    "ayuda:generar": "node tools/ayuda/generar.mjs",
+    "ayuda:subir": "node tools/ayuda/subir.mjs"
   },
   "private": true,
   "packageManager": "npm@11.13.0",
@@ -34,6 +36,9 @@
     "@angular/build": "^21.2.10",
     "@angular/cli": "^21.2.10",
     "@angular/compiler-cli": "^21.2.0",
+    "ffmpeg-static": "^5.3.0",
+    "msedge-tts": "^2.1.1",
+    "playwright": "^1.64.1",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2"
   }

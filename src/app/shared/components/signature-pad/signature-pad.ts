@@ -54,10 +54,21 @@ export class SignaturePad implements AfterViewInit {
   protected readonly empty = signal(true);
 
   ngAfterViewInit(): void {
+    this.fitCanvas();
+  }
+
+  /**
+   * Ajusta la resolución del lienzo a su tamaño en pantalla. Dentro de un p-dialog el lienzo se crea
+   * antes de tener medidas (ancho 0) y no dibujaría nada: por eso se vuelve a ajustar al empezar a firmar.
+   */
+  private fitCanvas(): void {
     const el = this.canvas().nativeElement;
     const ratio = window.devicePixelRatio || 1;
-    el.width = el.offsetWidth * ratio;
-    el.height = el.offsetHeight * ratio;
+    const width = Math.round(el.offsetWidth * ratio);
+    const height = Math.round(el.offsetHeight * ratio);
+    if (this.ctx && el.width === width && el.height === height) return;
+    el.width = width;
+    el.height = height;
     this.ctx = el.getContext('2d');
     if (!this.ctx) return;
     this.ctx.scale(ratio, ratio);
@@ -67,6 +78,7 @@ export class SignaturePad implements AfterViewInit {
   }
 
   protected start(e: PointerEvent): void {
+    if (this.empty()) this.fitCanvas();
     if (!this.ctx) return;
     this.drawing = true;
     this.canvas().nativeElement.setPointerCapture(e.pointerId);

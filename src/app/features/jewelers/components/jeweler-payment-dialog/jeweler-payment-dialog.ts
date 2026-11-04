@@ -11,7 +11,7 @@ import { ConfirmationService } from 'primeng/api';
 import { PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
-import { toIsoDate } from '../../../../shared/utils/db';
+import { endOfToday, toIsoDate } from '../../../../shared/utils/db';
 import { positiveValidator } from '../../../../shared/utils/validators';
 import { OrderDetail } from '../../../orders/models/order.model';
 import { ReceiptPdfService } from '../../../payments/services/receipt-pdf.service';
@@ -84,7 +84,7 @@ export class JewelerPaymentDialog {
 
   protected readonly saving = signal(false);
   protected readonly methods = PAYMENT_METHOD_OPTIONS;
-  protected readonly today = new Date();
+  protected readonly today = endOfToday();
 
   protected readonly form = inject(FormBuilder).group({
     jeweler_id: [null as string | null, Validators.required],

@@ -8,10 +8,11 @@ import { AuthService } from '../../core/auth/auth.service';
 import { ROLE_LABELS } from '../../core/models/domain';
 import { BreadcrumbService } from '../breadcrumb.service';
 import { ChangePasswordDialog } from '../change-password-dialog/change-password-dialog';
+import { HelpDialog } from '../help/help-dialog';
 
 @Component({
   selector: 'app-topbar',
-  imports: [BreadcrumbModule, ButtonModule, MenuModule, AvatarModule, ChangePasswordDialog],
+  imports: [BreadcrumbModule, ButtonModule, MenuModule, AvatarModule, ChangePasswordDialog, HelpDialog],
   template: `
     <div class="topbar">
       <p-button
@@ -23,6 +24,15 @@ import { ChangePasswordDialog } from '../change-password-dialog/change-password-
         (onClick)="toggleMenu.emit()"
       />
       <p-breadcrumb class="topbar__crumbs" [model]="breadcrumb.items()" [home]="home" />
+      <p-button
+        class="topbar__help"
+        icon="pi pi-question-circle"
+        [rounded]="true"
+        [text]="true"
+        severity="secondary"
+        ariaLabel="Ayuda: manual y video de esta pantalla"
+        (onClick)="helpVisible.set(true)"
+      />
       <button type="button" class="topbar__user" (click)="userMenu.toggle($event)" aria-label="Menú de usuario">
         <p-avatar [label]="initials()" shape="circle" />
         <span class="topbar__user-text">
@@ -34,6 +44,7 @@ import { ChangePasswordDialog } from '../change-password-dialog/change-password-
       <p-menu #userMenu [model]="menuItems" [popup]="true" appendTo="body" />
     </div>
     <app-change-password-dialog [(visible)]="passwordVisible" />
+    <app-help-dialog [(visible)]="helpVisible" />
   `,
   styleUrl: './topbar.scss',
 })
@@ -44,6 +55,7 @@ export class Topbar {
 
   protected readonly home: MenuItem = { icon: 'pi pi-home', routerLink: '/' };
   protected readonly passwordVisible = signal(false);
+  protected readonly helpVisible = signal(false);
 
   protected readonly roleLabel = computed(() => {
     const role = this.auth.role();

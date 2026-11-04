@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ButtonModule } from 'primeng/button';
@@ -83,9 +83,16 @@ export class MaterialList implements OnInit {
       .toFixed(2),
   );
 
+  private readonly prices = viewChild(MaterialPrices);
+
   ngOnInit(): void {
     void this.load();
     void this.loadMovements();
+  }
+
+  /** Un material nuevo o editado también cambia la pestaña «Precios del día». */
+  protected async afterMaterialSaved(): Promise<void> {
+    await Promise.all([this.load(), this.prices()?.load()]);
   }
 
   protected async load(): Promise<void> {
