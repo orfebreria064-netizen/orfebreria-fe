@@ -10,11 +10,11 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   width: 100%;
-  max-width: 920px;
-  min-height: 480px;
+  max-width: 780px;
+  min-height: 410px;
   overflow: hidden;
   border: 1px solid var(--p-surface-200);
-  border-radius: 1.25rem;
+  border-radius: 1rem;
   background: var(--p-surface-0);
   box-shadow:
     0 1px 2px rgba(31, 36, 48, 0.04),
@@ -28,8 +28,8 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 1.5rem;
-  padding: 2.5rem 2rem 3.5rem;
+  gap: 1.15rem;
+  padding: 2rem 1.75rem 3rem;
   overflow: hidden;
   color: #e9e4d8;
   text-align: center;
@@ -51,13 +51,13 @@
   }
 
   &::before {
-    width: 300px;
-    height: 300px;
+    width: 240px;
+    height: 240px;
   }
 
   &::after {
-    width: 450px;
-    height: 450px;
+    width: 360px;
+    height: 360px;
     border-color: rgba(201, 163, 82, 0.07);
   }
 }
@@ -65,45 +65,45 @@
 .hero__logo {
   position: relative;
   z-index: 1;
-  width: 150px;
-  height: 150px;
+  width: 118px;
+  height: 118px;
   border-radius: 50%;
   object-fit: cover;
   box-shadow:
     0 0 0 1px rgba(201, 163, 82, 0.35),
-    0 0 0 8px rgba(201, 163, 82, 0.06),
-    0 18px 44px rgba(0, 0, 0, 0.55);
+    0 0 0 6px rgba(201, 163, 82, 0.06),
+    0 14px 36px rgba(0, 0, 0, 0.55);
 }
 
 .hero__text {
   position: relative;
   z-index: 1;
-  max-width: 18rem;
+  max-width: 15rem;
 
   p {
     margin: 0;
-    font-size: 0.95rem;
-    line-height: 1.6;
+    font-size: 0.8rem;
+    line-height: 1.55;
     color: #a9a497;
   }
 }
 
 .hero__rule {
   display: block;
-  width: 48px;
+  width: 40px;
   height: 2px;
-  margin: 0 auto 1rem;
+  margin: 0 auto 0.75rem;
   border-radius: 2px;
   background: linear-gradient(90deg, var(--p-primary-300), var(--p-primary-500));
 }
 
 .hero__footer {
   position: absolute;
-  bottom: 1.25rem;
+  bottom: 1rem;
   left: 0;
   right: 0;
   margin: 0;
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   letter-spacing: 0.08em;
   color: #6f6b62;
 }
@@ -113,20 +113,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 2.75rem 3rem;
+  padding: 2.25rem 2.5rem;
 }
 
 .panel__inner {
   width: 100%;
-  max-width: 360px;
+  max-width: 310px;
 }
 
 .panel__head {
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.4rem;
 
   h1 {
-    margin: 0 0 0.4rem;
-    font-size: 1.75rem;
+    margin: 0 0 0.3rem;
+    font-size: 1.4rem;
     font-weight: 650;
     letter-spacing: -0.02em;
     color: var(--p-surface-900);
@@ -134,59 +134,62 @@
 
   p {
     margin: 0;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     color: var(--p-surface-500);
   }
 }
 
 form {
-  gap: 1.25rem;
+  gap: 1rem;
   margin-top: 0;
 }
 
 label {
+  font-size: 0.85rem;
   font-weight: 550;
   color: var(--p-surface-700);
 }
 
-// Campos y botón más altos y cómodos
+// Campos y botón: alto cómodo sin agrandar la tarjeta
 :host ::ng-deep {
   .p-inputtext {
-    height: 2.875rem;
-    padding-inline: 0.9rem;
-    border-radius: 0.6rem;
+    height: 2.5rem;
+    padding-inline: 0.8rem;
+    border-radius: 0.55rem;
+    font-size: 0.9rem;
   }
 
   .p-button {
-    height: 2.875rem;
-    margin-top: 0.5rem;
-    border-radius: 0.6rem;
+    height: 2.5rem;
+    margin-top: 0.35rem;
+    border-radius: 0.55rem;
+    font-size: 0.9rem;
     font-weight: 600;
     letter-spacing: 0.01em;
   }
 
   .p-message {
-    margin-bottom: 1.25rem;
+    margin-bottom: 1rem;
   }
 }
 
 .link-button {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 500;
 }
 
 .panel__note {
-  margin: 0 0 1.25rem;
-  font-size: 0.9rem;
+  margin: 0 0 1rem;
+  font-size: 0.85rem;
   line-height: 1.55;
   color: var(--p-surface-500);
 }
 
 .panel__footer {
-  margin-top: 2rem;
-  padding-top: 1.25rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
   border-top: 1px solid var(--p-surface-100);
-  font-size: 0.8rem;
+  font-size: 0.72rem;
   line-height: 1.5;
   color: var(--p-surface-400);
   text-align: center;
