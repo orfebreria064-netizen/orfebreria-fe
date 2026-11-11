@@ -41,7 +41,12 @@
           <span class="muted small">{{ m.notes || '' }}{{ m.received_from ? ' · Entregó: ' + m.received_from : '' }}</span>
         }
       </td>
-      <td class="nowrap">{{ m.method ? (m.method | label: methodLabels) : '—' }}{{ m.reference ? ' · ' + m.reference : '' }}</td>
+      <td class="nowrap">
+        {{ m.method ? (m.method | label: methodLabels) : '—' }}{{ m.reference ? ' · ' + m.reference : '' }}
+        @if (m.bank_account) {
+          <div class="muted small">{{ m.bank_account.alias }}</div>
+        }
+      </td>
       <td class="text-right mono nowrap" [class.text-success]="sign(m) > 0" [class.text-danger]="sign(m) < 0"
           [style.text-decoration]="m.voided ? 'line-through' : 'none'">
         {{ sign(m) > 0 ? '+' : '−' }} {{ m.amount | money: m.currency }}
@@ -88,6 +93,17 @@
       <label for="cc-ref">{{ form.controls.method.value === 'CHEQUE' ? 'N.° de cheque' : 'Referencia / N.° operación' }}</label>
       <input pInputText id="cc-ref" formControlName="reference" />
     </div>
+    @if (accountOptions().length) {
+      <div class="field field--full">
+        <label for="cc-account">{{ mode() === 'DEPOSITO' ? 'Cuenta destino' : 'Cuenta de origen' }} <span class="req">*</span></label>
+        <p-select inputId="cc-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id"
+                  [placeholder]="mode() === 'DEPOSITO' ? '¿A qué cuenta entró el dinero?' : '¿De qué cuenta sale el dinero?'" appendTo="body">
+          <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
+          <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
+        </p-select>
+        <app-field-error [control]="form.controls.bank_account_id" />
+      </div>
+    }
     @if (mode() === 'DEPOSITO') {
       <div class="field">
         <label for="cc-from">Entregado por</label>

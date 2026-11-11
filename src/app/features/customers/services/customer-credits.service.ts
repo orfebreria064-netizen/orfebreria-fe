@@ -18,6 +18,8 @@ export interface CustomerCredit {
   received_from: string | null;
   receipt_number: string | null;
   payment_id: string | null;
+  bank_account_id?: string | null;
+  bank_account?: { id: string; alias: string } | null;
   voided: boolean;
   void_reason: string | null;
   created_at: string;
@@ -33,6 +35,7 @@ export interface CreditMovementInput {
   reference: string | null;
   notes: string | null;
   received_from?: string | null;
+  bank_account_id?: string | null;
 }
 
 export type CreditBalances = Record<Currency, number>;
@@ -54,7 +57,7 @@ export class CustomerCreditsService {
     return unwrap(
       await this.db
         .from('customer_credits')
-        .select('*, creator:profiles!customer_credits_created_by_fkey(full_name), payment:payments(order:orders(id, number, title))')
+        .select('*, creator:profiles!customer_credits_created_by_fkey(full_name), payment:payments(order:orders(id, number, title)), bank_account:bank_accounts(id, alias)')
         .eq('customer_id', customerId)
         .order('movement_date', { ascending: false })
         .order('created_at', { ascending: false }),

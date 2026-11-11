@@ -1,4 +1,7 @@
-import { Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, input, output, signal, untracked } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { BankAccountsService } from '../../../../core/services/bank-accounts.service';
+import { accountLabel, compatibleAccounts, suggestedAccount } from '../../../../core/models/bank.model';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { RouterLink } from '@angular/router';
@@ -102,7 +105,29 @@ export class CustomerCredits implements OnInit {
     reference: ['', Validators.maxLength(80)],
     received_from: ['', Validators.maxLength(150)],
     notes: ['', Validators.maxLength(500)],
+    bank_account_id: [null as string | null],
   });
+
+  // Cuenta donde entra (depósito) o de donde sale (devolución) el dinero
+  private readonly bankAccounts = inject(BankAccountsService);
+  private readonly formMethod = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
+  private readonly formCurrency = toSignal(this.form.controls.currency.valueChanges, { initialValue: this.form.controls.currency.value });
+  protected readonly accountOptions = computed(() =>
+    compatibleAccounts(this.bankAccounts.accounts(), this.formMethod(), this.formCurrency() ?? 'PEN'),
+  );
+  protected readonly accountLabel = accountLabel;
+
+  constructor() {
+    effect(() => {
+      const options = this.accountOptions();
+      untracked(() => {
+        const ctrl = this.form.controls.bank_account_id;
+        ctrl.setValidators(options.length ? [Validators.required] : []);
+        if (!options.some((a) => a.id === ctrl.value)) ctrl.setValue(suggestedAccount(options));
+        ctrl.updateValueAndValidity({ emitEvent: false });
+      });
+    });
+  }
 
   // Anulación
   protected readonly voidDialog = signal(false);
@@ -151,7 +176,9 @@ export class CustomerCredits implements OnInit {
       reference: '',
       received_from: '',
       notes: '',
+      bank_account_id: null,
     });
+    void this.bankAccounts.ensureLoaded().catch((err) => this.notify.error(err, 'No se pudieron cargar las cuentas.'));
     this.dialog.set(true);
   }
 
@@ -178,6 +205,7 @@ export class CustomerCredits implements OnInit {
         reference: v.reference?.trim() || null,
         notes: v.notes?.trim() || null,
         received_from: refund ? null : v.received_from?.trim() || null,
+        bank_account_id: v.bank_account_id || null,
       };
       const r = refund ? await this.service.refund(this.customer().id, input) : await this.service.deposit(this.customer().id, input);
       this.notify.success(
