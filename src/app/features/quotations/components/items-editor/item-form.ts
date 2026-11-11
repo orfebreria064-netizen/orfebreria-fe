@@ -1,4 +1,5 @@
 import { AbstractControl, FormArray, FormControl, FormGroup, ValidationErrors, Validators } from '@angular/forms';
+import { lineGross } from '../../../../shared/utils/totals';
 import { positiveValidator } from '../../../../shared/utils/validators';
 import { QuotationItem } from '../../models/quotation.model';
 
@@ -27,10 +28,15 @@ export const UNIT_OPTIONS = [
 
 /** El descuento de una línea no puede superar su importe bruto. */
 function discountWithinLine(group: AbstractControl): ValidationErrors | null {
-  const qty = Number(group.get('quantity')?.value ?? 0);
-  const price = Number(group.get('unit_price')?.value ?? 0);
   const discount = Number(group.get('discount')?.value ?? 0);
-  return discount > Math.round(qty * price * 100) / 100 ? { discount: 'El descuento supera el importe de la línea.' } : null;
+  const gross = lineGross({
+    quantity: group.get('quantity')?.value,
+    unit_price: group.get('unit_price')?.value,
+    discount,
+    unit: group.get('unit')?.value,
+    weight: group.get('weight')?.value,
+  });
+  return discount > gross ? { discount: 'El descuento supera el importe de la línea.' } : null;
 }
 
 export function createItemGroup(item?: Partial<QuotationItem>): ItemFormGroup {

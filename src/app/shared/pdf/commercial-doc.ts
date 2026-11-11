@@ -1,6 +1,7 @@
 import type { OrderDetail } from '../../features/orders/models/order.model';
 import type { QuotationDetail } from '../../features/quotations/models/quotation.model';
 import { currencySymbol } from '../pipes/money.pipe';
+import { lineSubtotal } from '../utils/totals';
 import {
   INK,
   MUTED,
@@ -116,7 +117,7 @@ export function renderCommercialDoc(ctx: PdfContext, d: CommercialDocData): void
       detail ? `${it.description}\n${detail}` : it.description,
       grams(it.weight),
       num(it.unit_price),
-      num(it.subtotal ?? Number(it.quantity) * Number(it.unit_price) - Number(it.discount)),
+      num(it.subtotal ?? lineSubtotal(it)),
     ];
   });
   while (body.length < MIN_ROWS) body.push(['', '', '', '', '']);
