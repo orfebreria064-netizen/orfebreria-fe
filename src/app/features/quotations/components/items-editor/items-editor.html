@@ -39,8 +39,15 @@
         />
         @if (dayPriceOf(group); as m) {
           <small class="items__day-price">
-            Precio del día: {{ m.day_price | money }}/{{ m.unit }}
-            @if (!dayPriceApplied(group, m)) {
+            Precio del día: {{ m.day_price | money: 'USD' }}/{{ m.unit }}
+            @if (currency() !== 'USD') {
+              @if (dayPriceIn(m); as pen) {
+                ≈ {{ pen | money }} (TC {{ sellRate() }})
+              } @else {
+                · sin tipo de cambio del día
+              }
+            }
+            @if (dayPriceIn(m) != null && !dayPriceApplied(group, m)) {
               · <a href="" (click)="$event.preventDefault(); applyDayPrice(group)">Aplicar</a>
             }
           </small>

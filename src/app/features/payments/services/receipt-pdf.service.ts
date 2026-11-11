@@ -1,7 +1,8 @@
 import { Injectable, inject } from '@angular/core';
 import { LookupService } from '../../../core/services/lookup.service';
 import { createPdf, outputPdf } from '../../../shared/pdf/pdf-kit';
-import { renderExpense, renderIncome } from '../../../shared/pdf/receipt-docs';
+import { renderExpense, renderIncome, renderRefund } from '../../../shared/pdf/receipt-docs';
+import { CustomerCredit } from '../../customers/services/customer-credits.service';
 import { JewelerPayment } from '../../jewelers/models/jeweler.model';
 import { Payment } from '../models/payment.model';
 import { PaymentsService } from './payments.service';
@@ -25,6 +26,50 @@ export class ReceiptPdfService {
   async incomeById(orderId: string, paymentId: string): Promise<void> {
     const payment = (await this.payments.byOrder(orderId)).find((p) => p.id === paymentId);
     if (payment) await this.income(payment);
+  }
+
+  /** Recibo de ingreso de un depósito a cuenta o de egreso de una devolución del saldo a favor. */
+  async credit(
+    c: CustomerCredit,
+    customer: { id: string; full_name: string; document_type?: string | null; document_number?: string | null },
+    mode: 'print' | 'download' = 'print',
+  ): Promise<void> {
+    if (!c.receipt_number || !c.method) return;
+    await this.lookups.ensureLoaded();
+    const ctx = await createPdf(this.lookups.settings(), 'a5', 'landscape');
+    const createdBy = c.creator?.full_name ?? null;
+    if (c.kind === 'DEVOLUCION') {
+      renderRefund(ctx, { ...c, receipt_number: c.receipt_number, method: c.method, created_by_name: createdBy }, customer);
+    } else {
+      const concept = ['Depósito a cuenta · queda como saldo a favor del cliente', c.notes ? `(${c.notes})` : null]
+        .filter(Boolean)
+        .join(' ');
+      renderIncome(
+        ctx,
+        {
+          id: c.id,
+          order_id: '',
+          payment_date: c.movement_date,
+          amount: c.amount,
+          currency: c.currency,
+          method: c.method,
+          reference: c.reference,
+          notes: null,
+          is_advance: false,
+          receipt_number: c.receipt_number,
+          received_from: c.received_from,
+          balance_after: null,
+          voided: c.voided,
+          voided_at: null,
+          void_reason: c.void_reason,
+          created_by_name: createdBy,
+          created_at: c.created_at,
+          order: { id: '', number: '', customer },
+        },
+        concept,
+      );
+    }
+    outputPdf(ctx.doc, mode, `${c.receipt_number}.pdf`);
   }
 
   /** Recibo de egreso (pago a joyero). */

@@ -50,7 +50,7 @@ import { MaterialsService } from '../../services/materials.service';
           <td>{{ r.type | label: typeLabels }}</td>
           <td class="text-right mono nowrap">
             @if (r.price != null) {
-              {{ r.price | money }} / {{ r.unit }}
+              {{ r.price | money: 'USD' }} / {{ r.unit }}
             } @else {
               <span class="muted">Sin precio</span>
             }
@@ -83,12 +83,12 @@ import { MaterialsService } from '../../services/materials.service';
               <p-inputnumber
                 [(ngModel)]="draft[r.material_id]"
                 mode="currency"
-                currency="PEN"
+                currency="USD"
                 locale="es-PE"
                 [min]="0"
                 inputStyleClass="text-right"
                 [fluid]="true"
-                [placeholder]="r.price != null ? (r.price | money) : 'S/ 0.00'"
+                [placeholder]="r.price != null ? (r.price | money: 'USD') : 'US$ 0.00'"
                 [ariaLabel]="'Nuevo precio de ' + r.name"
               />
             </td>
@@ -123,7 +123,7 @@ import { MaterialsService } from '../../services/materials.service';
         <ng-template #body let-h>
           <tr>
             <td class="nowrap">{{ h.price_date | date: 'dd/MM/yyyy' }}</td>
-            <td class="text-right mono nowrap">{{ h.price | money }} / {{ historyOf()?.unit }}</td>
+            <td class="text-right mono nowrap">{{ h.price | money: 'USD' }} / {{ historyOf()?.unit }}</td>
             <td>{{ h.updated_by ?? '—' }}</td>
           </tr>
         </ng-template>

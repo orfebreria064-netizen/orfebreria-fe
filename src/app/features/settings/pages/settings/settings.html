@@ -5,6 +5,7 @@
     <p-tablist>
       <p-tab value="company"><i class="pi pi-building"></i> Empresa</p-tab>
       <p-tab value="users"><i class="pi pi-users"></i> Usuarios</p-tab>
+      <p-tab value="banks"><i class="pi pi-building-columns"></i> Bancos y cuentas</p-tab>
       <p-tab value="stages"><i class="pi pi-sitemap"></i> Etapas de producción</p-tab>
       <p-tab value="services"><i class="pi pi-tags"></i> Tipos de servicio</p-tab>
     </p-tablist>
@@ -205,6 +206,15 @@
           </ng-template>
         </p-table>
         <app-access-link-dialog [(visible)]="accessLinkVisible" [result]="accessLink()" [appName]="lookups.settings()?.company_name ?? 'BRILLOS'" />
+      </p-tabpanel>
+
+      <!-- Bancos y cuentas -->
+      <p-tabpanel value="banks">
+        @defer (on viewport) {
+          <app-bank-accounts />
+        } @placeholder {
+          <div style="min-height: 4rem"></div>
+        }
       </p-tabpanel>
 
       <!-- Etapas -->

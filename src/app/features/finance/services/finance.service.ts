@@ -47,16 +47,22 @@ export interface Expense {
   amount: number;
   currency: Currency;
   method: PaymentMethod;
+  /** Cuenta de donde salió el dinero (0027_bancos_cuentas.sql). */
+  bank_account_id: string | null;
+  bank_account?: { id: string; alias: string } | null;
   notes: string | null;
   voided: boolean;
   void_reason: string | null;
   creator?: { full_name: string } | null;
 }
 
-export type ExpenseInput = Pick<Expense, 'expense_date' | 'category' | 'description' | 'supplier' | 'document_ref' | 'amount' | 'currency' | 'method' | 'notes'>;
+export type ExpenseInput = Pick<
+  Expense,
+  'expense_date' | 'category' | 'description' | 'supplier' | 'document_ref' | 'amount' | 'currency' | 'method' | 'bank_account_id' | 'notes'
+>;
 
 // ---------------------------------------------------------------- Préstamos
-export type LoanMethod = PaymentMethod | 'DESCUENTO_PLANILLA' | 'DESCUENTO_PAGO_JOYERO';
+export type LoanMethod = Exclude<PaymentMethod, 'SALDO_A_FAVOR'> | 'DESCUENTO_PLANILLA' | 'DESCUENTO_PAGO_JOYERO';
 export const LOAN_PAYMENT_METHOD_LABELS: Record<LoanMethod, string> = {
   EFECTIVO: 'Efectivo',
   YAPE: 'Yape',
@@ -141,7 +147,7 @@ export class FinanceService {
   async expenses(from: string, to: string, includeVoided = false): Promise<Expense[]> {
     let query = this.db
       .from('expenses')
-      .select('*, creator:profiles!expenses_created_by_fkey(full_name)')
+      .select('*, creator:profiles!expenses_created_by_fkey(full_name), bank_account:bank_accounts(id, alias)')
       .gte('expense_date', from)
       .lte('expense_date', to)
       .order('expense_date', { ascending: false })

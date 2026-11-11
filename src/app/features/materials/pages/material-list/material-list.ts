@@ -74,7 +74,7 @@ export class MaterialList implements OnInit {
 
   protected readonly lowStock = computed(() => this.materials().filter((m) => m.active && Number(m.stock) <= Number(m.min_stock)));
   protected readonly inventoryValue = computed(() =>
-    formatMoney(this.materials().reduce((acc, m) => acc + Number(m.stock) * Number(m.reference_cost), 0)),
+    formatMoney(this.materials().reduce((acc, m) => acc + Number(m.stock) * Number(m.reference_cost), 0), 'USD'),
   );
   protected readonly metalGrams = computed(() =>
     this.materials()

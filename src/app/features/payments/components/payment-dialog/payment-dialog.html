@@ -14,6 +14,11 @@
         <div><small>Pagado</small><strong class="text-success">{{ o.amount_paid | money: o.currency }}</strong></div>
         <div><small>Saldo</small><strong [class.text-danger]="o.balance > 0">{{ o.balance | money: o.currency }}</strong></div>
       </div>
+      @if (credit() > 0 && !useCredit()) {
+        <p-message class="field--full" severity="info" size="small" icon="pi pi-wallet">
+          El cliente tiene {{ credit() | money: o.currency }} de saldo a favor. Puede usarlo eligiendo el método «Saldo a favor».
+        </p-message>
+      }
     }
 
     <div class="field">
@@ -28,12 +33,34 @@
     </div>
     <div class="field">
       <label for="pay-method">Método <span class="req">*</span></label>
-      <p-select inputId="pay-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
+      <p-select inputId="pay-method" [options]="methods()" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
     </div>
-    <div class="field">
-      <label for="pay-ref">{{ form.controls.method.value === 'CHEQUE' ? 'N.° de cheque' : 'Referencia / N.° operación' }}</label>
-      <input pInputText id="pay-ref" formControlName="reference" />
-    </div>
+    @if (!useCredit()) {
+      <div class="field">
+        <label for="pay-ref">{{ form.controls.method.value === 'CHEQUE' ? 'N.° de cheque' : 'Referencia / N.° operación' }}</label>
+        <input pInputText id="pay-ref" formControlName="reference" />
+      </div>
+    } @else {
+      <div class="field">
+        <label>Disponible para este pedido</label>
+        <strong style="padding-top: 0.5rem">{{ creditApplicable() | money: currency() }}</strong>
+      </div>
+    }
+    @if (accountOptions().length) {
+      <div class="field field--full">
+        <label for="pay-account">Cuenta destino <span class="req">*</span></label>
+        <p-select inputId="pay-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id" placeholder="¿A qué cuenta entró el dinero?" appendTo="body">
+          <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
+          <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
+        </p-select>
+        <app-field-error [control]="form.controls.bank_account_id" />
+      </div>
+    }
+    @if (excess() > 0) {
+      <p-message class="field--full" severity="info" size="small" icon="pi pi-info-circle">
+        El monto supera el saldo del pedido: {{ excess() | money: currency() }} quedarán como saldo a favor del cliente para futuros pedidos.
+      </p-message>
+    }
     <div class="field field--full">
       <label for="pay-from">Entregado por</label>
       <input pInputText id="pay-from" formControlName="received_from" placeholder="Déjelo vacío si paga el mismo cliente" />

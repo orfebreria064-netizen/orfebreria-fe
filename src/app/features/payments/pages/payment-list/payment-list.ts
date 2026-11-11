@@ -13,7 +13,7 @@ import {
   ORDER_STATUS_LABELS,
   ORDER_STATUS_SEVERITY,
   PAYMENT_METHOD_LABELS,
-  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_FILTER_OPTIONS,
   PaymentMethod,
 } from '../../../../core/models/domain';
 import { NotifyService } from '../../../../core/services/notify.service';
@@ -66,7 +66,7 @@ export class PaymentList implements OnInit {
   protected readonly loading = signal(true);
   protected readonly dialog = signal(false);
 
-  protected readonly methods = PAYMENT_METHOD_OPTIONS;
+  protected readonly methods = PAYMENT_METHOD_FILTER_OPTIONS;
   protected readonly methodLabels = PAYMENT_METHOD_LABELS;
   protected readonly orderLabels = ORDER_STATUS_LABELS;
   protected readonly orderSeverity = ORDER_STATUS_SEVERITY;

@@ -188,7 +188,8 @@ export const OWNERSHIP_LABELS: Record<MaterialOwnership, string> = { EMPRESA: 'E
 export const OWNERSHIP_OPTIONS = toOptions(OWNERSHIP_LABELS);
 
 // ---------------------------------------------------------------- Pagos
-export type PaymentMethod = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'TARJETA' | 'CHEQUE' | 'OTRO';
+/** SALDO_A_FAVOR solo existe en pagos de pedidos: consume el saldo a favor del cliente (no es dinero nuevo). */
+export type PaymentMethod = 'EFECTIVO' | 'YAPE' | 'PLIN' | 'TRANSFERENCIA' | 'TARJETA' | 'CHEQUE' | 'OTRO' | 'SALDO_A_FAVOR';
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   EFECTIVO: 'Efectivo',
   YAPE: 'Yape',
@@ -197,8 +198,26 @@ export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   TARJETA: 'Tarjeta',
   CHEQUE: 'Cheque',
   OTRO: 'Otro',
+  SALDO_A_FAVOR: 'Saldo a favor',
 };
-export const PAYMENT_METHOD_OPTIONS = toOptions(PAYMENT_METHOD_LABELS);
+/** Métodos con dinero real (gastos, joyeros, depósitos, filtros...). */
+export const PAYMENT_METHOD_OPTIONS = toOptions(PAYMENT_METHOD_LABELS).filter((o) => o.value !== 'SALDO_A_FAVOR');
+export const PAYMENT_METHOD_FILTER_OPTIONS = toOptions(PAYMENT_METHOD_LABELS);
+
+// ---------------------------------------------------------------- Saldo a favor del cliente
+export type CreditKind = 'DEPOSITO' | 'EXCEDENTE' | 'APLICACION' | 'DEVOLUCION';
+export const CREDIT_KIND_LABELS: Record<CreditKind, string> = {
+  DEPOSITO: 'Depósito',
+  EXCEDENTE: 'Excedente de pago',
+  APLICACION: 'Aplicado a pedido',
+  DEVOLUCION: 'Devolución',
+};
+export const CREDIT_KIND_SEVERITY: Record<CreditKind, 'success' | 'info' | 'warn' | 'danger'> = {
+  DEPOSITO: 'success',
+  EXCEDENTE: 'info',
+  APLICACION: 'warn',
+  DEVOLUCION: 'danger',
+};
 
 // ---------------------------------------------------------------- Moneda (por documento)
 export type Currency = 'PEN' | 'USD';

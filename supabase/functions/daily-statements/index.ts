@@ -80,7 +80,7 @@ interface Mail {
 
 const METHODS: Record<string, string> = {
   EFECTIVO: 'Efectivo', YAPE: 'Yape', PLIN: 'Plin', TRANSFERENCIA: 'Transferencia',
-  TARJETA: 'Tarjeta', CHEQUE: 'Cheque', OTRO: 'Otro',
+  TARJETA: 'Tarjeta', CHEQUE: 'Cheque', OTRO: 'Otro', SALDO_A_FAVOR: 'Saldo a favor',
 };
 const STATUS: Record<string, string> = {
   SOLICITUD: 'Solicitud', COTIZADO: 'Cotizado', APROBADO: 'Aprobado', DISENO: 'Diseño', PRODUCCION: 'Producción',

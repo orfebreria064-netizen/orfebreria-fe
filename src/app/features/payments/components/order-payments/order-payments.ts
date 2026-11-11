@@ -61,7 +61,12 @@ import { TooltipModule } from 'primeng/tooltip';
           </td>
           <td>{{ p.reference || '—' }}</td>
           <td>{{ p.voided ? 'Anulado: ' + p.void_reason : p.notes || '—' }}</td>
-          <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money: p.currency }}</td>
+          <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">
+            {{ p.amount | money: p.currency }}
+            @if (p.credit_excess > 0) {
+              <div class="muted small" style="font-weight: normal">+ {{ p.credit_excess | money: p.currency }} a favor del cliente</div>
+            }
+          </td>
           <td class="text-right nowrap">
             <p-button icon="pi pi-print" [text]="true" severity="secondary" size="small" ariaLabel="Imprimir recibo de ingreso" pTooltip="Recibo de ingreso" (onClick)="printReceipt(p)" />
             @if (canVoid && !p.voided && !readonly()) {

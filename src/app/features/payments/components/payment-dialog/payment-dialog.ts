@@ -1,4 +1,5 @@
-import { Component, effect, inject, input, model, output, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, input, model, output, signal, untracked } from '@angular/core';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
 import { DialogModule } from 'primeng/dialog';
@@ -8,9 +9,12 @@ import { InputTextModule } from 'primeng/inputtext';
 import { DatePickerModule } from 'primeng/datepicker';
 import { TextareaModule } from 'primeng/textarea';
 import { CheckboxModule } from 'primeng/checkbox';
+import { MessageModule } from 'primeng/message';
 import { ConfirmationService } from 'primeng/api';
-import { PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
+import { Currency, PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
 import { NotifyService } from '../../../../core/services/notify.service';
+import { BankAccountsService } from '../../../../core/services/bank-accounts.service';
+import { accountLabel, compatibleAccounts, suggestedAccount } from '../../../../core/models/bank.model';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
 import { endOfToday, toIsoDate } from '../../../../shared/utils/db';
@@ -18,12 +22,18 @@ import { positiveValidator } from '../../../../shared/utils/validators';
 import { Order, OrderRow } from '../../../orders/models/order.model';
 import { OrderPicker } from '../../../orders/components/order-picker/order-picker';
 import { OrdersService } from '../../../orders/services/orders.service';
+import { CustomerCreditsService } from '../../../customers/services/customer-credits.service';
 import { PaymentsService } from '../../services/payments.service';
 import { ReceiptPdfService } from '../../services/receipt-pdf.service';
 
-type OrderAmounts = Pick<Order, 'id' | 'number' | 'total' | 'amount_paid' | 'balance' | 'currency'>;
+type OrderAmounts = Pick<Order, 'id' | 'number' | 'total' | 'amount_paid' | 'balance' | 'currency' | 'customer_id'>;
 
-/** Registro de pagos y adelantos. Si el monto supera el saldo, pide confirmación explícita. */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/**
+ * Registro de pagos y adelantos. Si el monto supera el saldo, el sobrante pasa solo al saldo a favor del
+ * cliente. Con el método "Saldo a favor" se usa el dinero que el cliente dejó a cuenta.
+ */
 @Component({
   selector: 'app-payment-dialog',
   imports: [
@@ -36,6 +46,7 @@ type OrderAmounts = Pick<Order, 'id' | 'number' | 'total' | 'amount_paid' | 'bal
     DatePickerModule,
     TextareaModule,
     CheckboxModule,
+    MessageModule,
     FieldError,
     MoneyPipe,
     OrderPicker,
@@ -45,9 +56,11 @@ type OrderAmounts = Pick<Order, 'id' | 'number' | 'total' | 'amount_paid' | 'bal
 export class PaymentDialog {
   private readonly service = inject(PaymentsService);
   private readonly orders = inject(OrdersService);
+  private readonly credits = inject(CustomerCreditsService);
   private readonly notify = inject(NotifyService);
   private readonly confirm = inject(ConfirmationService);
   private readonly receipts = inject(ReceiptPdfService);
+  private readonly bankAccounts = inject(BankAccountsService);
 
   readonly visible = model(false);
   /** Pedido fijo (desde la ficha del pedido). */
@@ -55,8 +68,9 @@ export class PaymentDialog {
   readonly saved = output<void>();
 
   protected readonly order = signal<OrderAmounts | null>(null);
+  /** Saldo a favor del cliente del pedido, en la moneda del pedido. */
+  protected readonly credit = signal(0);
   protected readonly saving = signal(false);
-  protected readonly methods = PAYMENT_METHOD_OPTIONS;
   protected readonly today = endOfToday();
 
   protected readonly form = inject(FormBuilder).group({
@@ -68,13 +82,52 @@ export class PaymentDialog {
     notes: ['', Validators.maxLength(500)],
     is_advance: [false],
     received_from: ['', Validators.maxLength(150)],
+    /** Cuenta donde entra el dinero (obligatoria si hay cuentas para el método y la moneda). */
+    bank_account_id: [null as string | null],
   });
 
-  protected currency(): string {
+  private readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
+  /** Cuentas que sirven para el método y la moneda del pedido (el saldo a favor no entra a ninguna). */
+  protected readonly accountOptions = computed(() =>
+    compatibleAccounts(this.bankAccounts.accounts(), this.method(), this.currency()),
+  );
+  protected readonly accountLabel = accountLabel;
+  private readonly amount = toSignal(this.form.controls.amount.valueChanges, { initialValue: this.form.controls.amount.value });
+
+  protected readonly useCredit = computed(() => this.method() === 'SALDO_A_FAVOR');
+  private readonly balance = computed(() => Number(this.order()?.balance ?? 0));
+  /** Lo máximo que se puede aplicar del saldo a favor a este pedido. */
+  protected readonly creditApplicable = computed(() => round2(Math.max(0, Math.min(this.balance(), this.credit()))));
+  /** Lo que pasará al saldo a favor del cliente (monto mayor al saldo del pedido). */
+  protected readonly excess = computed(() => {
+    if (this.useCredit() || !this.order() || this.balance() <= 0) return 0;
+    return round2(Math.max(0, Number(this.amount() ?? 0) - this.balance()));
+  });
+
+  protected readonly methods = computed(() =>
+    this.credit() > 0
+      ? [
+          ...PAYMENT_METHOD_OPTIONS,
+          { value: 'SALDO_A_FAVOR' as PaymentMethod, label: `Saldo a favor (${formatMoney(this.credit(), this.currency())})` },
+        ]
+      : PAYMENT_METHOD_OPTIONS,
+  );
+
+  protected currency(): Currency {
     return this.order()?.currency ?? 'PEN';
   }
 
   constructor() {
+    // Propone la cuenta (única o principal) y la exige cuando hay opciones
+    effect(() => {
+      const options = this.accountOptions();
+      untracked(() => {
+        const ctrl = this.form.controls.bank_account_id;
+        ctrl.setValidators(options.length ? [Validators.required] : []);
+        if (!options.some((a) => a.id === ctrl.value)) ctrl.setValue(suggestedAccount(options));
+        ctrl.updateValueAndValidity({ emitEvent: false });
+      });
+    });
     effect(() => {
       if (!this.visible()) return;
       const fixed = this.orderId();
@@ -89,10 +142,21 @@ export class PaymentDialog {
           notes: '',
           is_advance: false,
           received_from: '',
+          bank_account_id: null,
         });
         this.order.set(null);
+        void this.bankAccounts.ensureLoaded().catch((err) => this.notify.error(err, 'No se pudieron cargar las cuentas.'));
+        this.credit.set(0);
         if (fixed) void this.loadOrder(fixed);
       });
+    });
+
+    // Al elegir "Saldo a favor" se sugiere lo máximo aplicable; al volver a otro método, el saldo del pedido.
+    this.form.controls.method.valueChanges.pipe(takeUntilDestroyed(inject(DestroyRef))).subscribe((m) => {
+      if (!this.order()) return;
+      if (m === 'SALDO_A_FAVOR') this.form.patchValue({ amount: this.creditApplicable() || null, reference: '' });
+      else if (this.balance() > 0 && Number(this.form.controls.amount.value) === this.creditApplicable())
+        this.form.patchValue({ amount: this.balance() });
     });
   }
 
@@ -106,10 +170,22 @@ export class PaymentDialog {
 
   protected setOrder(o: OrderAmounts | OrderRow | null): void {
     this.order.set(o);
+    this.credit.set(0);
+    if (this.form.controls.method.value === 'SALDO_A_FAVOR') this.form.patchValue({ method: 'EFECTIVO' });
     if (!o) return;
     const balance = Number(o.balance);
     // Primer pago = adelanto; el monto sugerido es el saldo.
     this.form.patchValue({ is_advance: Number(o.amount_paid) === 0, amount: balance > 0 ? balance : null });
+    void this.loadCredit(o);
+  }
+
+  private async loadCredit(o: OrderAmounts | OrderRow): Promise<void> {
+    try {
+      const balances = await this.credits.balances(o.customer_id);
+      if (this.order()?.id === o.id) this.credit.set(balances[o.currency] ?? 0);
+    } catch {
+      this.credit.set(0); // sin permiso o sin saldo: el método no se ofrece
+    }
   }
 
   async save(): Promise<void> {
@@ -119,23 +195,20 @@ export class PaymentDialog {
     }
     const o = this.order();
     const amount = Number(this.form.controls.amount.value);
-    const balance = Number(o?.balance ?? 0);
-    if (o && amount > balance) {
-      this.confirm.confirm({
-        header: 'Monto mayor al saldo',
-        message: `El monto ${formatMoney(amount, o.currency)} supera el saldo pendiente de ${formatMoney(balance, o.currency)}. ¿Desea registrarlo de todos modos?`,
-        icon: 'pi pi-exclamation-triangle',
-        acceptButtonProps: { label: 'Sí, registrar', severity: 'warn' },
-        rejectButtonProps: { label: 'Revisar monto', severity: 'secondary', text: true },
-        accept: () => void this.persist(true),
-      });
+    if (o && this.useCredit() && amount > this.creditApplicable()) {
+      this.notify.warn(`Del saldo a favor se pueden aplicar como máximo ${formatMoney(this.creditApplicable(), o.currency)} a este pedido.`);
       return;
     }
-    await this.persist(false);
+    if (o && !this.useCredit() && this.balance() <= 0) {
+      this.notify.warn('El pedido no tiene saldo pendiente. Registre el dinero como depósito en la ficha del cliente (pestaña Saldo a favor).');
+      return;
+    }
+    await this.persist();
   }
 
-  private async persist(overpaymentConfirmed: boolean): Promise<void> {
+  private async persist(): Promise<void> {
     const v = this.form.getRawValue();
+    const excess = this.excess();
     this.saving.set(true);
     try {
       const paymentId = await this.service.create({
@@ -147,11 +220,16 @@ export class PaymentDialog {
         notes: v.notes?.trim() || null,
         is_advance: !!v.is_advance,
         received_from: v.received_from?.trim() || null,
-        overpayment_confirmed: overpaymentConfirmed,
+        bank_account_id: v.bank_account_id || null,
+        overpayment_confirmed: true,
       });
-      const remaining = Number(this.order()?.balance ?? 0) - Number(v.amount);
+      const remaining = round2(this.balance() - Number(v.amount));
       this.notify.success(
-        remaining > 0 ? `Pago registrado. Saldo pendiente: ${formatMoney(remaining, this.currency())}.` : 'Pago registrado. El pedido quedó pagado.',
+        excess > 0
+          ? `Pago registrado. El pedido quedó pagado y ${formatMoney(excess, this.currency())} pasaron al saldo a favor del cliente.`
+          : remaining > 0
+            ? `Pago registrado. Saldo pendiente: ${formatMoney(remaining, this.currency())}.`
+            : 'Pago registrado. El pedido quedó pagado.',
       );
       this.visible.set(false);
       this.saved.emit();

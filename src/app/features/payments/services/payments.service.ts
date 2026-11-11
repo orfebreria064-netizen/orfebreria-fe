@@ -8,7 +8,7 @@ import { Payment, PaymentInput } from '../models/payment.model';
 
 /** balance_after y created_by_name son columnas calculadas para el recibo (0012_taller_joyeros_precios.sql). */
 const PAYMENT_SELECT =
-  '*, balance_after, created_by_name, order:orders(id, number, title, customer:customers(id, full_name, document_type, document_number))';
+  '*, balance_after, created_by_name, bank_account:bank_accounts(id, alias), order:orders(id, number, title, customer:customers(id, full_name, document_type, document_number))';
 
 export interface PaymentFilters {
   from?: string | null;

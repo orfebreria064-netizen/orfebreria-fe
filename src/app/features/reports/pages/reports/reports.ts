@@ -14,7 +14,7 @@ import {
   MaterialType,
   ORDER_STATUS_LABELS,
   PAYMENT_METHOD_LABELS,
-  PAYMENT_METHOD_OPTIONS,
+  PAYMENT_METHOD_FILTER_OPTIONS,
   PRIORITY_LABELS,
   PaymentMethod,
 } from '../../../../core/models/domain';
@@ -94,8 +94,10 @@ export class Reports implements OnInit {
   protected readonly currency = signal<Currency>('PEN');
   protected readonly currencies = CURRENCY_OPTIONS;
   protected readonly hasMoney = computed(() => ['ventas', 'cobrar', 'cobranza', 'plazos'].includes(this.selected()));
+  /** Moneda de los montos del reporte: la elegida, o dólares en el stock (costos de materiales en US$). */
+  protected readonly reportCurrency = computed<Currency>(() => (this.hasMoney() ? this.currency() : this.selected() === 'stock' ? 'USD' : 'PEN'));
 
-  protected readonly methods = PAYMENT_METHOD_OPTIONS;
+  protected readonly methods = PAYMENT_METHOD_FILTER_OPTIONS;
   protected readonly materialTypes = MATERIAL_TYPE_OPTIONS;
   protected readonly buckets = (Object.keys(AGING_LABELS) as AgingBucket[]).map((value) => ({ value, label: AGING_LABELS[value] }));
   protected readonly horizons = [
@@ -115,7 +117,7 @@ export class Reports implements OnInit {
   });
 
   protected money(value: number): string {
-    return formatMoney(value, this.hasMoney() ? this.currency() : 'PEN');
+    return formatMoney(value, this.reportCurrency());
   }
 
   protected setCurrency(currency: Currency): void {
@@ -326,7 +328,8 @@ export class Reports implements OnInit {
           rows = await this.service.deadlines(this.daysAhead, this.assignedTo);
           break;
         case 'stock':
-          rows = await this.service.stock(this.materialType, this.includeInactive);
+          // Los costos de materiales se registran en dólares.
+          rows = (await this.service.stock(this.materialType, this.includeInactive)).map((r) => ({ ...r, currency: 'USD' }));
           break;
         case 'custodia':
           rows = await this.service.custody(this.customerId);
@@ -349,7 +352,7 @@ export class Reports implements OnInit {
         columns: this.columns(),
         rows: this.rows(),
         summary: this.summary().map((s) => ({ ...s, value: s.hint ? `${s.value} (${s.hint})` : s.value })),
-        currency: this.hasMoney() ? this.currency() : 'PEN',
+        currency: this.reportCurrency(),
         fileName: `${this.info().title.replace(/[^\p{L}\p{N}]+/gu, '_')}_${toIsoDate(new Date())}`,
       };
       if (kind === 'excel') await this.exporter.excel(payload);

@@ -38,6 +38,8 @@ import { CustomersService } from '../../services/customers.service';
 import { QuotationRow } from '../../../quotations/models/quotation.model';
 import { OrderHistoryEntry, OrderRow } from '../../../orders/models/order.model';
 import { Payment } from '../../../payments/models/payment.model';
+import { CustomerCredits } from '../../components/customer-credits/customer-credits';
+import { CreditBalances, CustomerCreditsService } from '../../services/customer-credits.service';
 
 /** Ficha 360° del cliente. */
 @Component({
@@ -62,6 +64,7 @@ import { Payment } from '../../../payments/models/payment.model';
     HistoryTimeline,
     MoneyPipe,
     LabelPipe,
+    CustomerCredits,
   ],
   templateUrl: './customer-detail.html',
 })
@@ -105,6 +108,14 @@ export class CustomerDetail implements OnInit {
   protected readonly lastOrder = computed(() => this.orders().at(0) ?? null);
   protected readonly totalPurchased = computed(() => formatMoney(this.stats()?.total_purchased));
   protected readonly balance = computed(() => formatMoney(this.stats()?.balance));
+  /** Saldo a favor del cliente (dinero dejado a cuenta). */
+  protected readonly credits = signal<CreditBalances>({ PEN: 0, USD: 0 });
+  protected readonly creditHint = computed(() => {
+    const c = this.credits();
+    const parts = [c.PEN > 0 ? formatMoney(c.PEN, 'PEN') : null, c.USD > 0 ? formatMoney(c.USD, 'USD') : null].filter(Boolean);
+    return parts.length ? `A favor del cliente: ${parts.join(' · ')}` : null;
+  });
+  private readonly creditsService = inject(CustomerCreditsService);
 
   // Contactos
   protected readonly contactDialog = signal(false);
@@ -145,6 +156,7 @@ export class CustomerDetail implements OnInit {
       ]);
       this.quotations.set(quotations);
       this.payments.set(payments);
+      if (this.canSeePayments) this.credits.set(await this.creditsService.balances(id).catch(() => ({ PEN: 0, USD: 0 })));
     } catch (err) {
       this.notify.error(err, 'No se pudo cargar el cliente.');
       void this.router.navigate(['/customers']);

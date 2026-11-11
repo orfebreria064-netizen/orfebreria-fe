@@ -32,7 +32,7 @@
   <div class="grid-cols grid-cols--4" style="margin-bottom: 1rem">
     <app-stat-card label="Pedidos" [value]="stats()?.orders_count ?? 0" icon="pi pi-briefcase" tone="ink" />
     <app-stat-card label="Total comprado" [value]="totalPurchased()" icon="pi pi-shopping-bag" tone="gold" />
-    <app-stat-card label="Saldo pendiente" [value]="balance()" icon="pi pi-wallet" [tone]="(stats()?.balance ?? 0) > 0 ? 'red' : 'green'" />
+    <app-stat-card label="Saldo pendiente" [value]="balance()" icon="pi pi-wallet" [tone]="(stats()?.balance ?? 0) > 0 ? 'red' : 'green'" [hint]="creditHint()" />
     <app-stat-card
       label="Último pedido"
       [value]="lastOrder()?.number ?? '—'"
@@ -53,6 +53,7 @@
         <p-tab value="orders"><i class="pi pi-briefcase"></i> Pedidos ({{ orders().length }})</p-tab>
         @if (canSeePayments) {
           <p-tab value="payments"><i class="pi pi-wallet"></i> Pagos ({{ payments().length }})</p-tab>
+          <p-tab value="credits"><i class="pi pi-money-bill"></i> Saldo a favor</p-tab>
         }
         <p-tab value="history"><i class="pi pi-history"></i> Historial</p-tab>
       </p-tablist>
@@ -211,6 +212,13 @@
                 <tr><td colspan="5"><app-empty-state icon="pi pi-wallet" message="Sin pagos registrados." /></td></tr>
               </ng-template>
             </p-table>
+          </p-tabpanel>
+        }
+
+        <!-- Saldo a favor -->
+        @if (canSeePayments) {
+          <p-tabpanel value="credits">
+            <app-customer-credits [customer]="c" (balancesChange)="credits.set($event)" />
           </p-tabpanel>
         }
 

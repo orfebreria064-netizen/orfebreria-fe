@@ -68,6 +68,9 @@
                 @if (p.voided) {
                   <p-tag value="Anulado" severity="danger" />
                 }
+                @if (p.bank_account) {
+                  <br /><span class="muted small">{{ p.bank_account.alias }}</span>
+                }
               </td>
               <td>{{ p.reference || '—' }}</td>
               <td class="text-right mono nowrap strong" [style.text-decoration]="p.voided ? 'line-through' : 'none'">{{ p.amount | money: p.currency }}</td>

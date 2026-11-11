@@ -15,6 +15,11 @@ export interface Payment {
   receipt_number: string | null;
   /** Quién entregó el dinero, si no fue el cliente. */
   received_from: string | null;
+  /** Lo que el cliente entregó por encima del saldo del pedido: pasó a su saldo a favor. */
+  credit_excess?: number;
+  /** Cuenta donde entró el dinero (0027_bancos_cuentas.sql). */
+  bank_account_id?: string | null;
+  bank_account?: { id: string; alias: string } | null;
   /** Saldo del pedido después de este pago (0 o menos = este pago lo canceló). */
   balance_after?: number | null;
   voided: boolean;
@@ -39,6 +44,8 @@ export interface PaymentInput {
   notes: string | null;
   is_advance: boolean;
   received_from: string | null;
+  /** Cuenta donde entró el dinero (0027_bancos_cuentas.sql). */
+  bank_account_id?: string | null;
   /** Confirmación explícita cuando el monto supera el saldo (lo valida la base de datos). */
   overpayment_confirmed: boolean;
 }

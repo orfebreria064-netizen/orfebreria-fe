@@ -1,4 +1,5 @@
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, FormsModule, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ButtonModule } from 'primeng/button';
@@ -13,6 +14,8 @@ import { TagModule } from 'primeng/tag';
 import { TextareaModule } from 'primeng/textarea';
 import { CURRENCY_OPTIONS, Currency, PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
 import { NotifyService } from '../../../../core/services/notify.service';
+import { BankAccountsService } from '../../../../core/services/bank-accounts.service';
+import { accountAcceptsMethod, accountLabel, compatibleAccounts, suggestedAccount } from '../../../../core/models/bank.model';
 import { EmptyState } from '../../../../shared/components/empty-state/empty-state';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { LabelPipe } from '../../../../shared/pipes/label.pipe';
@@ -74,7 +77,7 @@ import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCate
             }
           </td>
           <td class="small">{{ e.supplier ?? '—' }}@if (e.document_ref) {<br /><span class="muted">{{ e.document_ref }}</span>}</td>
-          <td>{{ e.method | label: methodLabels }}</td>
+          <td>{{ e.method | label: methodLabels }}@if (e.bank_account) {<br /><span class="muted small">{{ e.bank_account.alias }}</span>}</td>
           <td class="text-right mono nowrap">{{ e.amount | money: e.currency }}</td>
           <td class="text-right nowrap">
             @if (!e.voided) {
@@ -117,6 +120,16 @@ import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCate
           <label for="ex-method">Método de pago <span class="req">*</span></label>
           <p-select inputId="ex-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
         </div>
+        @if (accountOptions().length) {
+          <div class="field">
+            <label for="ex-account">Cuenta de origen <span class="req">*</span></label>
+            <p-select inputId="ex-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id" placeholder="¿De qué cuenta salió?" appendTo="body">
+              <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
+              <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
+            </p-select>
+            <app-field-error [control]="form.controls.bank_account_id" />
+          </div>
+        }
         <div class="field">
           <label for="ex-sup">Proveedor / pagado a</label>
           <input pInputText id="ex-sup" formControlName="supplier" />
@@ -164,6 +177,7 @@ import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCate
 export class ExpenseList implements OnInit {
   private readonly service = inject(FinanceService);
   private readonly notify = inject(NotifyService);
+  private readonly bankAccounts = inject(BankAccountsService);
 
   protected readonly categories = EXPENSE_CATEGORY_OPTIONS;
   protected readonly categoryLabels = EXPENSE_CATEGORY_LABELS;
@@ -204,13 +218,39 @@ export class ExpenseList implements OnInit {
     amount: [null as number | null, [Validators.required, positiveValidator]],
     currency: ['PEN' as Currency, Validators.required],
     method: ['EFECTIVO' as PaymentMethod, Validators.required],
+    bank_account_id: [null as string | null],
     supplier: [''],
     document_ref: [''],
     notes: [''],
   });
 
+  private readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
+  private readonly currency = toSignal(this.form.controls.currency.valueChanges, { initialValue: this.form.controls.currency.value });
+  /** Cuentas activas compatibles con el método y la moneda; al editar se conserva la ya asignada aunque esté desactivada. */
+  protected readonly accountOptions = computed(() => {
+    const options = compatibleAccounts(this.bankAccounts.accounts(), this.method(), this.currency() ?? 'PEN');
+    const current = this.editing()?.bank_account_id;
+    const kept = this.bankAccounts.accounts().find((a) => a.id === current && !a.active);
+    return kept && kept.currency === this.currency() && accountAcceptsMethod(kept, this.method()) ? [...options, kept] : options;
+  });
+  protected readonly accountLabel = accountLabel;
+
+  constructor() {
+    // Propone la cuenta (única o principal) y la exige cuando hay opciones
+    effect(() => {
+      const options = this.accountOptions();
+      untracked(() => {
+        const ctrl = this.form.controls.bank_account_id;
+        ctrl.setValidators(options.length ? [Validators.required] : []);
+        if (!options.some((a) => a.id === ctrl.value)) ctrl.setValue(suggestedAccount(options));
+        ctrl.updateValueAndValidity({ emitEvent: false });
+      });
+    });
+  }
+
   ngOnInit(): void {
     void this.load();
+    void this.bankAccounts.ensureLoaded().catch((err) => this.notify.error(err, 'No se pudieron cargar las cuentas.'));
   }
 
   protected async load(): Promise<void> {
@@ -228,7 +268,7 @@ export class ExpenseList implements OnInit {
 
   protected openNew(): void {
     this.editing.set(null);
-    this.form.reset({ expense_date: new Date(), category: 'SERVICIOS', description: '', amount: null, currency: 'PEN', method: 'EFECTIVO', supplier: '', document_ref: '', notes: '' });
+    this.form.reset({ expense_date: new Date(), category: 'SERVICIOS', description: '', amount: null, currency: 'PEN', method: 'EFECTIVO', bank_account_id: null, supplier: '', document_ref: '', notes: '' });
     this.dialogVisible = true;
   }
 
@@ -241,6 +281,7 @@ export class ExpenseList implements OnInit {
       amount: Number(e.amount),
       currency: e.currency,
       method: e.method,
+      bank_account_id: e.bank_account_id,
       supplier: e.supplier ?? '',
       document_ref: e.document_ref ?? '',
       notes: e.notes ?? '',
@@ -263,6 +304,7 @@ export class ExpenseList implements OnInit {
         amount: Number(v.amount),
         currency: v.currency!,
         method: v.method!,
+        bank_account_id: v.bank_account_id || null,
         supplier: v.supplier?.trim() || null,
         document_ref: v.document_ref?.trim() || null,
         notes: v.notes?.trim() || null,

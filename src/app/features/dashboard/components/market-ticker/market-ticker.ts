@@ -19,7 +19,7 @@ import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
           <span class="chip__body">
             <small>Oro hoy{{ goldStale() ? ' · desactualizado' : '' }}</small>
             @if (m.company_gold[0]; as g) {
-              <strong>{{ g.purity ?? g.name }}: {{ g.price | money }}/{{ g.unit }}</strong>
+              <strong>{{ g.purity ?? g.name }}: {{ g.price | money: 'USD' }}/{{ g.unit }}</strong>
             } @else if (m.gold?.pen_g_24k) {
               <strong>24K: {{ m.gold!.pen_g_24k | money }}/g</strong>
             } @else {

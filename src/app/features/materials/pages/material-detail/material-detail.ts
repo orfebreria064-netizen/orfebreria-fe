@@ -97,6 +97,6 @@ export class MaterialDetail implements OnInit {
   }
 
   protected value(m: Material): string {
-    return formatMoney(Number(m.stock) * Number(m.reference_cost));
+    return formatMoney(Number(m.stock) * Number(m.reference_cost), 'USD');
   }
 }

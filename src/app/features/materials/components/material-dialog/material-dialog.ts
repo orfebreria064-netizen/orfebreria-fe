@@ -44,12 +44,12 @@ import { MaterialsService } from '../../services/materials.service';
         </div>
         <div class="field">
           <label for="mt-price">Precio de venta del día</label>
-          <p-inputnumber inputId="mt-price" formControlName="day_price" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+          <p-inputnumber inputId="mt-price" formControlName="day_price" mode="currency" currency="USD" locale="es-PE" [min]="0" [fluid]="true" />
           <small class="muted">Por {{ unitLabel() }}. Se sugiere en cotizaciones y pedidos.</small>
         </div>
         <div class="field">
           <label for="mt-cost">Costo de compra (referencial)</label>
-          <p-inputnumber inputId="mt-cost" formControlName="reference_cost" mode="currency" currency="PEN" locale="es-PE" [min]="0" [fluid]="true" />
+          <p-inputnumber inputId="mt-cost" formControlName="reference_cost" mode="currency" currency="USD" locale="es-PE" [min]="0" [fluid]="true" />
           <small class="muted">Valoriza el inventario; no se cobra al cliente.</small>
           <app-field-error [control]="form.controls.reference_cost" />
         </div>

@@ -58,7 +58,7 @@
                 }
               </td>
               <td class="text-right mono nowrap muted">{{ m.min_stock | qty: m.unit }}</td>
-              <td class="text-right mono nowrap">{{ m.reference_cost | money }} / {{ m.unit }}</td>
+              <td class="text-right mono nowrap">{{ m.reference_cost | money: 'USD' }} / {{ m.unit }}</td>
               <td><p-tag [value]="m.active ? 'Activo' : 'Inactivo'" [severity]="m.active ? 'success' : 'secondary'" /></td>
               <td class="text-right">
                 @if (canWrite) {

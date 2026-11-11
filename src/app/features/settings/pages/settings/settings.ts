@@ -28,6 +28,7 @@ import { PageHeader } from '../../../../shared/components/page-header/page-heade
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { phoneValidator } from '../../../../shared/utils/validators';
 import { SettingsService } from '../../services/settings.service';
+import { BankAccounts } from '../../components/bank-accounts/bank-accounts';
 
 /** Configuración: empresa, usuarios (invitaciones), etapas y tipos de servicio. */
 @Component({
@@ -52,6 +53,7 @@ import { SettingsService } from '../../services/settings.service';
     MessageModule,
     PageHeader,
     FieldError,
+    BankAccounts,
   ],
   templateUrl: './settings.html',
   styleUrl: './settings.scss',

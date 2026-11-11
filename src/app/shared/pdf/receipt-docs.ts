@@ -1,4 +1,4 @@
-import { PAYMENT_METHOD_LABELS } from '../../core/models/domain';
+import { PAYMENT_METHOD_LABELS, PaymentMethod } from '../../core/models/domain';
 import type { JewelerPayment } from '../../features/jewelers/models/jeweler.model';
 import type { Payment } from '../../features/payments/models/payment.model';
 import { currencySymbol, formatMoney } from '../pipes/money.pipe';
@@ -65,13 +65,19 @@ function wrappedField(ctx: PdfContext, label: string, value: string, x: number, 
   return cy + 9;
 }
 
-export function renderIncome(ctx: PdfContext, p: Payment): void {
+/**
+ * Recibo de ingreso. Si el pago tuvo excedente, el importe es lo entregado (pago + excedente) y el concepto
+ * lo indica. `concept` reemplaza el concepto (depósitos a cuenta del saldo a favor).
+ */
+export function renderIncome(ctx: PdfContext, p: Payment, concept?: string): void {
   const { doc, width: W } = ctx;
   const settings = ctx.brand.settings;
   const m = 12;
   const w = W - 2 * m;
   let y = receiptHeader(ctx, 'RECIBO DE INGRESO', p.receipt_number ?? '');
-  amountBox(ctx, Number(p.amount), p.currency, y - 4);
+  const excess = Number(p.credit_excess ?? 0);
+  const received = Number(p.amount) + excess;
+  amountBox(ctx, received, p.currency, y - 4);
 
   y += 12;
   field(ctx, '', placeAndDate(settings, p.payment_date), m, y, 90);
@@ -81,20 +87,26 @@ export function renderIncome(ctx: PdfContext, p: Payment): void {
   const payerDoc = !p.received_from && customer?.document_number ? `  (${customer.document_type ?? 'DOC'} ${customer.document_number})` : '';
   field(ctx, 'Recibí de :', payer + payerDoc, m, y, w);
   y += 9;
-  y = wrappedField(ctx, 'La cantidad de:', amountToWords(p.amount, p.currency), m, y, w);
+  y = wrappedField(ctx, 'La cantidad de:', amountToWords(received, p.currency), m, y, w);
   // El pago que deja el saldo en cero es la cancelación del pedido; los demás, adelanto o pago a cuenta con su saldo
   const balanceAfter = p.balance_after != null ? Number(p.balance_after) : null;
   const settled = balanceAfter !== null && balanceAfter <= 0;
   const kind = settled ? 'Cancelación' : p.is_advance ? 'Adelanto' : 'Pago a cuenta';
-  const concept = [
-    `${kind} del pedido ${p.order?.number ?? ''}`,
-    p.order?.title ? `– ${p.order.title}` : null,
-    p.notes ? `(${p.notes})` : null,
-    !settled && balanceAfter !== null && !p.voided ? `· Saldo: ${formatMoney(balanceAfter, p.currency)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' ');
-  y = wrappedField(ctx, 'Por concepto de:', concept, m, y, w);
+  const text =
+    concept ??
+    [
+      `${kind} del pedido ${p.order?.number ?? ''}`,
+      p.order?.title ? `– ${p.order.title}` : null,
+      p.method === 'SALDO_A_FAVOR' ? '· pagado con saldo a favor del cliente' : null,
+      p.notes ? `(${p.notes})` : null,
+      !settled && balanceAfter !== null && !p.voided ? `· Saldo: ${formatMoney(balanceAfter, p.currency)}` : null,
+      excess > 0
+        ? `· Aplicado al pedido: ${formatMoney(p.amount, p.currency)}; a favor del cliente: ${formatMoney(excess, p.currency)}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(' ');
+  y = wrappedField(ctx, 'Por concepto de:', text, m, y, w);
 
   // Forma de pago
   y += 1;
@@ -115,7 +127,55 @@ export function renderIncome(ctx: PdfContext, p: Payment): void {
   doc.text('DNI: ________________', W - m - 39, sy + 12, { align: 'center' });
 
   if (p.voided) voidStamp(ctx, p.void_reason);
-  printedAt(ctx, `${currencySymbol(p.currency)} · Pedido ${p.order?.number ?? ''}`);
+  printedAt(ctx, `${currencySymbol(p.currency)} · ${p.order?.number ? `Pedido ${p.order.number}` : 'Saldo a favor'}`);
+}
+
+/** Recibo de egreso por la devolución del saldo a favor al cliente. */
+export function renderRefund(
+  ctx: PdfContext,
+  r: {
+    receipt_number: string;
+    amount: number;
+    currency: string;
+    method: PaymentMethod;
+    reference: string | null;
+    movement_date: string;
+    notes: string | null;
+    voided: boolean;
+    void_reason: string | null;
+    created_by_name: string | null;
+  },
+  customer: { full_name: string; document_type?: string | null; document_number?: string | null },
+): void {
+  const { doc, width: W } = ctx;
+  const settings = ctx.brand.settings;
+  const m = 12;
+  const w = W - 2 * m;
+  let y = receiptHeader(ctx, 'RECIBO DE EGRESO', r.receipt_number);
+  amountBox(ctx, Number(r.amount), r.currency, y - 4);
+
+  y += 12;
+  field(ctx, '', placeAndDate(settings, r.movement_date), m, y, 90);
+  y += 9;
+  const customerDoc = customer.document_number ? `  (${customer.document_type ?? 'DOC'} ${customer.document_number})` : '';
+  field(ctx, 'Entregado a :', customer.full_name + customerDoc, m, y, w);
+  y += 9;
+  y = wrappedField(ctx, 'La cantidad de:', amountToWords(r.amount, r.currency), m, y, w);
+  const concept = ['Devolución del saldo a favor del cliente', r.notes ? `(${r.notes})` : null].filter(Boolean).join(' ');
+  y = wrappedField(ctx, 'Por concepto de:', concept, m, y, w);
+  y += 1;
+  field(ctx, 'Forma de pago:', `${PAYMENT_METHOD_LABELS[r.method]}${r.reference ? ` · Ref. ${r.reference}` : ''}`, m, y, w);
+
+  const sy = 124;
+  signature(ctx, 'Entregado por', m + 4, sy, 70, r.created_by_name ? `Nombre: ${r.created_by_name}` : null);
+  signature(ctx, 'Recibí conforme', W - m - 74, sy, 70, customer.full_name);
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(8.5);
+  doc.setTextColor(...INK);
+  doc.text(`DNI: ${customer.document_number ?? '________________'}`, W - m - 39, sy + 12, { align: 'center' });
+
+  if (r.voided) voidStamp(ctx, r.void_reason);
+  printedAt(ctx, `${currencySymbol(r.currency)} · Saldo a favor`);
 }
 
 export function renderExpense(ctx: PdfContext, p: JewelerPayment, order: { number: string; title?: string | null; customer?: string | null }): void {

@@ -8,6 +8,7 @@ import { SelectModule } from 'primeng/select';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { computeTotals, lineSubtotal } from '../../../../shared/utils/totals';
+import { MarketService } from '../../../../core/services/market.service';
 import { Material } from '../../../materials/models/material.model';
 import { ItemFormGroup, UNIT_OPTIONS, createItemGroup } from './item-form';
 
@@ -23,6 +24,7 @@ import { ItemFormGroup, UNIT_OPTIONS, createItemGroup } from './item-form';
 })
 export class ItemsEditor implements OnInit {
   private readonly destroyRef = inject(DestroyRef);
+  private readonly market = inject(MarketService);
 
   readonly items = input.required<FormArray<ItemFormGroup>>();
   readonly materials = input<Material[]>([]);
@@ -31,6 +33,8 @@ export class ItemsEditor implements OnInit {
   readonly currency = input<string>('PEN');
 
   protected readonly units = UNIT_OPTIONS;
+  /** TC venta del día: el precio del día de los materiales está en dólares y se convierte en documentos en soles. */
+  protected readonly sellRate = signal<number | null>(null);
   /** Versión que cambia con cada edición para recalcular totales (los FormArray no son signals). */
   private readonly version = signal(0);
 
@@ -48,6 +52,10 @@ export class ItemsEditor implements OnInit {
       .valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => this.version.update((v) => v + 1));
     if (this.items().length === 0) this.add();
+    this.market
+      .today()
+      .then((m) => this.sellRate.set(m.exchange?.sell ? Number(m.exchange.sell) : null))
+      .catch(() => this.sellRate.set(null));
   }
 
   protected lineTotal(group: ItemFormGroup): number {
@@ -70,7 +78,7 @@ export class ItemsEditor implements OnInit {
       group.controls.description.setValue(material.name);
     }
     // Línea sin precio: se propone el precio del día del material (por su unidad).
-    if (material?.day_price != null && !group.controls.unit_price.value) this.applyDayPrice(group);
+    if (material?.day_price != null && !group.controls.unit_price.value && this.dayPriceIn(material) != null) this.applyDayPrice(group);
   }
 
   /** Precio del día del material de la línea, si tiene. */
@@ -80,13 +88,22 @@ export class ItemsEditor implements OnInit {
   }
 
   protected dayPriceApplied(group: ItemFormGroup, material: Material): boolean {
-    return group.controls.unit.value === material.unit && Number(group.controls.unit_price.value) === Number(material.day_price);
+    return group.controls.unit.value === material.unit && Number(group.controls.unit_price.value) === this.dayPriceIn(material);
   }
 
   protected applyDayPrice(group: ItemFormGroup): void {
     const material = this.dayPriceOf(group);
-    if (!material) return;
+    const price = material ? this.dayPriceIn(material) : null;
+    if (!material || price == null) return;
     group.controls.unit.setValue(material.unit);
-    group.controls.unit_price.setValue(Number(material.day_price));
+    group.controls.unit_price.setValue(price);
+  }
+
+  /** Precio del día (registrado en US$) en la moneda del documento; null si es en soles y no hay TC del día. */
+  protected dayPriceIn(material: Material): number | null {
+    const usd = Number(material.day_price);
+    if (this.currency() === 'USD') return usd;
+    const rate = this.sellRate();
+    return rate ? Math.round(usd * rate * 100) / 100 : null;
   }
 }

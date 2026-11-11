@@ -1,0 +1,117 @@
+<div class="row row--between" style="margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.75rem">
+  <div class="amounts">
+    <div><small>Saldo a favor en soles</small><strong [class.text-success]="balances().PEN > 0">{{ balances().PEN | money: 'PEN' }}</strong></div>
+    <div><small>Saldo a favor en dólares</small><strong [class.text-success]="balances().USD > 0">{{ balances().USD | money: 'USD' }}</strong></div>
+  </div>
+  <div class="row">
+    @if (canManage && hasBalance()) {
+      <p-button label="Devolver dinero" icon="pi pi-replay" severity="secondary" [outlined]="true" (onClick)="open('DEVOLUCION')" />
+    }
+    @if (canDeposit) {
+      <p-button label="Registrar depósito" icon="pi pi-plus" (onClick)="open('DEPOSITO')" />
+    }
+  </div>
+</div>
+<p class="muted small" style="margin-top: 0">
+  El dinero que el cliente deja a cuenta se descuenta de sus pedidos desde <strong>Registrar pago</strong>, eligiendo el método
+  «Saldo a favor». Si un pago supera el saldo del pedido, el sobrante también queda aquí.
+</p>
+
+<p-table [value]="movements()" [loading]="loading()" [scrollable]="true" [tableStyle]="{ 'min-width': '760px' }" size="small">
+  <ng-template #header>
+    <tr><th>Fecha</th><th>Movimiento</th><th>Recibo</th><th>Detalle</th><th>Método</th><th class="text-right">Monto</th><th></th></tr>
+  </ng-template>
+  <ng-template #body let-m>
+    <tr [style.opacity]="m.voided ? 0.5 : 1">
+      <td class="nowrap">{{ m.movement_date | date: 'dd/MM/yyyy' }}</td>
+      <td class="nowrap">
+        <p-tag [value]="m.kind | label: kindLabels" [severity]="severity(m)" />
+        @if (m.voided) {
+          <p-tag value="Anulado" severity="danger" [title]="m.void_reason" />
+        }
+      </td>
+      <td class="nowrap mono">{{ m.receipt_number || '—' }}</td>
+      <td>
+        @if (m.payment?.order; as o) {
+          Pedido <a class="link" [routerLink]="['/orders', o.id]">{{ o.number }}</a>
+        }
+        @if (m.voided) {
+          <span class="muted small"> Anulado: {{ m.void_reason }}</span>
+        } @else if (m.kind === 'DEPOSITO' || m.kind === 'DEVOLUCION') {
+          <span class="muted small">{{ m.notes || '' }}{{ m.received_from ? ' · Entregó: ' + m.received_from : '' }}</span>
+        }
+      </td>
+      <td class="nowrap">{{ m.method ? (m.method | label: methodLabels) : '—' }}{{ m.reference ? ' · ' + m.reference : '' }}</td>
+      <td class="text-right mono nowrap" [class.text-success]="sign(m) > 0" [class.text-danger]="sign(m) < 0"
+          [style.text-decoration]="m.voided ? 'line-through' : 'none'">
+        {{ sign(m) > 0 ? '+' : '−' }} {{ m.amount | money: m.currency }}
+      </td>
+      <td class="text-right nowrap">
+        @if (m.receipt_number && (m.kind === 'DEPOSITO' || m.kind === 'DEVOLUCION')) {
+          <p-button icon="pi pi-print" [text]="true" size="small" severity="secondary" ariaLabel="Imprimir recibo" (onClick)="print(m)" />
+          @if (canManage && !m.voided) {
+            <p-button icon="pi pi-ban" [text]="true" size="small" severity="danger" ariaLabel="Anular" (onClick)="openVoid(m)" />
+          }
+        }
+      </td>
+    </tr>
+  </ng-template>
+  <ng-template #emptymessage>
+    <tr><td colspan="7"><app-empty-state icon="pi pi-wallet" message="El cliente no tiene movimientos de saldo a favor." /></td></tr>
+  </ng-template>
+</p-table>
+
+<p-dialog [header]="mode() === 'DEPOSITO' ? 'Depósito a cuenta del cliente' : 'Devolver saldo a favor'" [(visible)]="dialog"
+          [modal]="true" [style]="{ width: '520px' }" [draggable]="false">
+  <form [formGroup]="form" (ngSubmit)="save()" class="form-grid" novalidate>
+    <div class="field">
+      <label for="cc-currency">Moneda <span class="req">*</span></label>
+      <p-select inputId="cc-currency" [options]="currencies" formControlName="currency" optionLabel="label" optionValue="value" appendTo="body" />
+    </div>
+    <div class="field">
+      <label for="cc-amount">Monto <span class="req">*</span></label>
+      <p-inputnumber inputId="cc-amount" formControlName="amount" mode="currency" [currency]="form.controls.currency.value ?? 'PEN'" locale="es-PE" [min]="0" [fluid]="true" />
+      <app-field-error [control]="form.controls.amount" />
+      @if (mode() === 'DEVOLUCION') {
+        <small class="muted">Disponible: {{ balances()[form.controls.currency.value ?? 'PEN'] | money: form.controls.currency.value ?? 'PEN' }}</small>
+      }
+    </div>
+    <div class="field">
+      <label for="cc-date">Fecha <span class="req">*</span></label>
+      <p-datepicker inputId="cc-date" formControlName="movement_date" dateFormat="dd/mm/yy" [maxDate]="today" [showIcon]="true" appendTo="body" [fluid]="true" />
+    </div>
+    <div class="field">
+      <label for="cc-method">Método <span class="req">*</span></label>
+      <p-select inputId="cc-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
+    </div>
+    <div class="field">
+      <label for="cc-ref">{{ form.controls.method.value === 'CHEQUE' ? 'N.° de cheque' : 'Referencia / N.° operación' }}</label>
+      <input pInputText id="cc-ref" formControlName="reference" />
+    </div>
+    @if (mode() === 'DEPOSITO') {
+      <div class="field">
+        <label for="cc-from">Entregado por</label>
+        <input pInputText id="cc-from" formControlName="received_from" placeholder="Vacío si es el mismo cliente" />
+      </div>
+    }
+    <div class="field field--full">
+      <label for="cc-notes">Observaciones</label>
+      <textarea pTextarea id="cc-notes" formControlName="notes" rows="2" [autoResize]="true"></textarea>
+    </div>
+    <div class="form-actions field--full" style="margin-top: 0.25rem">
+      <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="dialog.set(false)" />
+      <p-button type="submit" [label]="mode() === 'DEPOSITO' ? 'Registrar depósito' : 'Registrar devolución'" icon="pi pi-check" [loading]="saving()" />
+    </div>
+  </form>
+</p-dialog>
+
+<p-dialog header="Anular movimiento" [(visible)]="voidDialog" [modal]="true" [style]="{ width: '440px' }" [draggable]="false">
+  <div class="field">
+    <label for="cc-void-reason">Motivo de la anulación <span class="req">*</span></label>
+    <textarea pTextarea id="cc-void-reason" [(ngModel)]="voidReason" rows="3"></textarea>
+  </div>
+  <ng-template #footer>
+    <p-button label="Cancelar" severity="secondary" [text]="true" (onClick)="voidDialog.set(false)" />
+    <p-button label="Anular" severity="danger" icon="pi pi-ban" [disabled]="!voidReason.trim()" [loading]="voiding()" (onClick)="confirmVoid()" />
+  </ng-template>
+</p-dialog>
