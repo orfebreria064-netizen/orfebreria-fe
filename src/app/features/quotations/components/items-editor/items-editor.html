@@ -56,9 +56,12 @@
         }
       </div>
       <div class="items__cell">
-        <label class="items__label">Cantidad</label>
-        <p-inputnumber formControlName="quantity" [minFractionDigits]="0" [maxFractionDigits]="group.controls.product_id.value || group.controls.gem_id.value ? 0 : 3" [min]="0" inputStyleClass="text-right" [fluid]="true" locale="es-PE" />
+        <label class="items__label">{{ group.controls.unit.value === 'g' && group.controls.weight.value ? 'Cantidad (piezas)' : 'Cantidad' }}</label>
+        <p-inputnumber formControlName="quantity" [minFractionDigits]="0" [maxFractionDigits]="group.controls.product_id.value || group.controls.gem_id.value || (group.controls.unit.value === 'g' && group.controls.weight.value) ? 0 : 3" [min]="0" inputStyleClass="text-right" [fluid]="true" locale="es-PE" />
         <app-field-error [control]="group.controls.quantity" />
+        @if (group.errors?.['pieces']; as msg) {
+          <small class="text-danger small">{{ msg }}</small>
+        }
       </div>
       <div class="items__cell">
         <label class="items__label">Unidad</label>

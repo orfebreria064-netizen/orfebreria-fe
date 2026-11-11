@@ -1,7 +1,7 @@
 import type { OrderDetail } from '../../features/orders/models/order.model';
 import type { QuotationDetail } from '../../features/quotations/models/quotation.model';
 import { currencySymbol } from '../pipes/money.pipe';
-import { lineSubtotal } from '../utils/totals';
+import { lineSubtotal, quantityUnit } from '../utils/totals';
 import {
   INK,
   MUTED,
@@ -113,7 +113,7 @@ export function renderCommercialDoc(ctx: PdfContext, d: CommercialDocData): void
   const body = d.items.map((it) => {
     const detail = [it.detail, Number(it.discount) ? `Descuento: ${symbol} ${num(it.discount)}` : null].filter(Boolean).join('\n');
     return [
-      it.unit && it.unit !== 'und' ? `${qty(it.quantity)} ${it.unit}` : qty(it.quantity),
+      [qty(it.quantity), quantityUnit(it)].filter(Boolean).join(' '),
       detail ? `${it.description}\n${detail}` : it.description,
       grams(it.weight),
       num(it.unit_price),

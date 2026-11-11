@@ -1,5 +1,6 @@
 import type { OrderDetail } from '../../features/orders/models/order.model';
 import { INK, MUTED, PdfContext, RED, drawLogo, field, grams, printedAt, sectionBand, shortDate } from './pdf-kit';
+import { quantityUnit } from '../utils/totals';
 
 /** Orden de producción (A5), como el talonario: cabecera, datos del trabajo, MANUFACTURA y ACABADO. */
 export function renderProductionOrder(ctx: PdfContext, o: OrderDetail, number: string): void {
@@ -70,7 +71,8 @@ export function renderProductionOrder(ctx: PdfContext, o: OrderDetail, number: s
   const lines: string[] = [];
   if (o.production_instructions) lines.push(...(doc.splitTextToSize(o.production_instructions, w - 6) as string[]), '');
   for (const it of o.items) {
-    const text = `• ${Number(it.quantity)} ${it.unit !== 'und' ? it.unit + ' ' : ''}${it.description}` +
+    const unit = quantityUnit(it);
+    const text = `• ${Number(it.quantity)} ${unit ? unit + ' ' : ''}${it.description}` +
       `${it.detail ? ` — ${it.detail}` : ''}${it.material_name ? ` · ${it.material_name}` : ''}${it.weight ? ` · ${grams(it.weight)}` : ''}`;
     lines.push(...(doc.splitTextToSize(text, w - 6) as string[]));
   }

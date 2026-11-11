@@ -26,6 +26,7 @@ import { PageHeader } from '../../../../shared/components/page-header/page-heade
 import { StatusTag } from '../../../../shared/components/status-tag/status-tag';
 import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { toIsoDate } from '../../../../shared/utils/db';
+import { quantityUnit } from '../../../../shared/utils/totals';
 import { daysUntil } from '../../../../shared/utils/format';
 import { QuotationDetail as Quotation } from '../../models/quotation.model';
 import { QuotationsService } from '../../services/quotations.service';
@@ -89,6 +90,7 @@ export class QuotationDetailPage implements OnInit {
   protected readonly labels = QUOTATION_STATUS_LABELS;
   protected readonly severities = QUOTATION_STATUS_SEVERITY;
   protected readonly priorities = PRIORITY_OPTIONS;
+  protected readonly quantityUnit = quantityUnit;
 
   protected readonly editable = computed(() => ['BORRADOR', 'ENVIADA'].includes(this.q()?.status ?? ''));
   protected readonly canApprove = computed(() => ['BORRADOR', 'ENVIADA'].includes(this.q()?.status ?? ''));

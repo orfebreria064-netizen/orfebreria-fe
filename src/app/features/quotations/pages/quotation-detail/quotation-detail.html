@@ -82,7 +82,7 @@
             }
           </td>
           <td>{{ it.material_name || '—' }}</td>
-          <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
+          <td class="text-right nowrap">{{ it.quantity }} {{ quantityUnit(it) }}</td>
           <td class="text-right nowrap">{{ it.weight ? it.weight + ' g' : '—' }}</td>
           <td class="text-right mono nowrap">{{ it.unit_price | money: q.currency }}</td>
           <td class="text-right mono nowrap">{{ it.discount > 0 ? (it.discount | money: q.currency) : '—' }}</td>

@@ -39,6 +39,18 @@ function discountWithinLine(group: AbstractControl): ValidationErrors | null {
   return discount > gross ? { discount: 'El descuento supera el importe de la línea.' } : null;
 }
 
+/**
+ * En una línea en gramos con peso, la cantidad son piezas (entero) y el importe es precio × peso.
+ * Evita el error típico de escribir el peso también en la cantidad (2.77 g → 2.77 piezas).
+ */
+function piecesWhenWeighed(group: AbstractControl): ValidationErrors | null {
+  const unit = group.get('unit')?.value;
+  const weight = Number(group.get('weight')?.value ?? 0);
+  const qty = Number(group.get('quantity')?.value ?? 0);
+  if (unit !== 'g' || weight <= 0 || !qty) return null;
+  return Number.isInteger(qty) ? null : { pieces: 'Con peso, la cantidad son piezas (ej. 1). El peso va en «Peso (g)».' };
+}
+
 export function createItemGroup(item?: Partial<QuotationItem>): ItemFormGroup {
   return new FormGroup(
     {
@@ -60,7 +72,7 @@ export function createItemGroup(item?: Partial<QuotationItem>): ItemFormGroup {
       product_id: new FormControl(item?.product_id ?? null),
       gem_id: new FormControl(item?.gem_id ?? null),
     },
-    { validators: discountWithinLine },
+    { validators: [discountWithinLine, piecesWhenWeighed] },
   ) as ItemFormGroup;
 }
 

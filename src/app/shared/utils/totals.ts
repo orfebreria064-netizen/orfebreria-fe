@@ -27,6 +27,20 @@ export function billableQty(line: Pick<PricedLine, 'quantity' | 'unit' | 'weight
   return line.unit === 'g' && weight > 0 ? weight : Number(line.quantity ?? 0);
 }
 
+/** ¿Línea en gramos con peso? Entonces la cantidad son piezas y se cobra por el peso. */
+export function isWeighedLine(line: Pick<PricedLine, 'unit' | 'weight'>): boolean {
+  return line.unit === 'g' && Number(line.weight ?? 0) > 0;
+}
+
+/**
+ * Unidad que se muestra junto a la cantidad: "pza" en líneas pesadas (el peso va en Gr.),
+ * nada para 'und' y la unidad en el resto ("1 ct", "2 par").
+ */
+export function quantityUnit(line: Pick<PricedLine, 'unit' | 'weight'>): string {
+  if (isWeighedLine(line)) return 'pza';
+  return line.unit && line.unit !== 'und' ? line.unit : '';
+}
+
 /** Importe bruto de la línea (antes de descuento). */
 export function lineGross(line: PricedLine): number {
   return round2(billableQty(line) * Number(line.unit_price ?? 0));

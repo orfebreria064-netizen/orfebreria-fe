@@ -128,7 +128,7 @@
     <tr>
       <td>{{ it.description }} @if (it.detail) {<small class="muted"> · {{ it.detail }}</small>}</td>
       <td>{{ it.material_name || '—' }}</td>
-      <td class="text-right nowrap">{{ it.quantity }} {{ it.unit }}</td>
+      <td class="text-right nowrap">{{ it.quantity }} {{ quantityUnit(it) }}</td>
       @if (showMoney()) {
         <td class="text-right mono nowrap">{{ it.unit_price | money: o.currency }}</td>
         <td class="text-right mono nowrap">{{ it.subtotal | money: o.currency }}</td>

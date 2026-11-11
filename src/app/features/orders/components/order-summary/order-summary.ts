@@ -14,6 +14,7 @@ import {
 import { MoneyPipe } from '../../../../shared/pipes/money.pipe';
 import { formatMoney } from '../../../../shared/pipes/money.pipe';
 import { daysUntil, whatsappLink } from '../../../../shared/utils/format';
+import { quantityUnit } from '../../../../shared/utils/totals';
 import { OrderDetail, OrderStage } from '../../models/order.model';
 
 export type OrderAction = 'stages' | 'production' | 'payment' | 'delivery' | 'status' | 'close';
@@ -39,6 +40,7 @@ export class OrderSummary {
   readonly act = output<OrderAction>();
 
   protected readonly priorityLabels = PRIORITY_LABELS;
+  protected readonly quantityUnit = quantityUnit;
   protected readonly prioritySeverity = PRIORITY_SEVERITY;
   protected readonly paymentLabels = PAYMENT_STATUS_LABELS;
   protected readonly paymentSeverity = PAYMENT_STATUS_SEVERITY;
