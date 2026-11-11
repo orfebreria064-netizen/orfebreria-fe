@@ -4752,3 +4752,4016 @@ grant execute on function public.report_collections(date, date, text, boolean, u
 grant execute on function public.report_order_deadlines(integer, uuid, uuid) to authenticated;
 grant execute on function public.report_stock(text, boolean, uuid) to authenticated;
 grant execute on function public.report_client_custody(uuid, uuid) to authenticated;
+
+-- >>> 0012_taller_joyeros_precios.sql
+-- =====================================================================
+-- 0012_taller_joyeros_precios.sql
+-- Documentos comerciales, taller y joyeros (equivalente a la sección 1b y
+-- 4.17 de database/mssql/orfebreria_mssql.sql):
+--   * Moneda por documento (PEN / USD) en cotizaciones, pedidos y pagos.
+--   * Peso en gramos por ítem (columna Gr. de los documentos).
+--   * Marca de la empresa para los documentos: logo, eslogan, celular, ciudad.
+--   * Proforma (PRO) y orden de producción (OP): un número por pedido,
+--     asignado al emitirlo por primera vez.
+--   * Recibo de ingreso (RI) por cada cobro y recibo de egreso (RE) por cada
+--     pago a un joyero externo.
+--   * Joyeros externos (no usan el sistema) y orden de producción del pedido:
+--     joyero, material entregado, indicaciones y acabado (merma calculada).
+--   * Precio de venta del día por material.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- Esquema
+-- ---------------------------------------------------------------------
+alter table public.settings
+  add column logo    text,     -- data URL (PNG/JPEG)
+  add column slogan  text,     -- una línea por viñeta
+  add column mobile  text,     -- Cel. / RPC
+  add column city    text;     -- "Lima, 16 de octubre del 2026"
+
+alter table public.document_sequences drop constraint document_sequences_doc_type_check;
+alter table public.document_sequences
+  add constraint document_sequences_doc_type_check
+  check (doc_type in ('COT', 'PED', 'ENT', 'PRO', 'OP', 'RI', 'RE'));
+
+alter table public.quotations
+  add column currency text not null default 'PEN' check (currency in ('PEN', 'USD'));
+alter table public.orders
+  add column currency text not null default 'PEN' check (currency in ('PEN', 'USD'));
+alter table public.quotation_items
+  add column weight numeric(10, 2) check (weight is null or weight > 0);
+alter table public.order_items
+  add column weight numeric(10, 2) check (weight is null or weight > 0);
+
+-- Joyeros externos. Se les paga por pedido.
+create table public.jewelers (
+  id               uuid primary key default gen_random_uuid(),
+  org_id           uuid not null default public.current_org_id() references public.organizations (id) on delete cascade,
+  full_name        text not null check (length(trim(full_name)) > 0),
+  document_number  text check (document_number ~ '^[0-9]+$'),
+  phone            text,
+  specialty        text,
+  notes            text,
+  active           boolean not null default true,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+create index jewelers_org_idx on public.jewelers (org_id, active);
+create unique index jewelers_document_uidx on public.jewelers (org_id, document_number) where document_number is not null;
+
+create trigger jewelers_updated_at before update on public.jewelers
+  for each row execute function public.set_updated_at();
+create trigger aa_subscription_guard before insert or update or delete on public.jewelers
+  for each row execute function public.enforce_org_writable();
+
+-- Pedido: proforma, orden de producción y taller
+alter table public.orders
+  add column proforma_number          text,
+  add column proforma_issued_at       timestamptz,
+  add column production_number        text,
+  add column production_issued_at     timestamptz,
+  add column jeweler_id               uuid references public.jewelers (id),
+  add column material_delivered_at    date,
+  add column material_weight_out      numeric(10, 2) check (material_weight_out is null or material_weight_out > 0),
+  add column production_instructions  text,
+  add column product_delivered_at     date,
+  add column weight_returned          numeric(10, 2) check (weight_returned is null or weight_returned > 0),
+  add column production_notes         text;
+alter table public.orders
+  add column waste_weight numeric(10, 2) generated always as (material_weight_out - weight_returned) stored;   -- merma
+create unique index orders_proforma_uidx on public.orders (org_id, proforma_number) where proforma_number is not null;
+create unique index orders_production_uidx on public.orders (org_id, production_number) where production_number is not null;
+create index orders_jeweler_idx on public.orders (jeweler_id) where jeweler_id is not null;
+
+-- Pagos: moneda (la del pedido), recibo de ingreso, quién entrega el dinero y cheque
+alter table public.payments
+  add column currency        text not null default 'PEN' check (currency in ('PEN', 'USD')),
+  add column receipt_number  text,
+  add column received_from   text;
+create unique index payments_receipt_uidx on public.payments (org_id, receipt_number) where receipt_number is not null;
+alter table public.payments drop constraint payments_method_check;
+alter table public.payments
+  add constraint payments_method_check
+  check (method in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'OTRO'));
+
+-- Historial: emisión de documentos y pagos a joyeros
+alter table public.order_history drop constraint order_history_event_type_check;
+alter table public.order_history
+  add constraint order_history_event_type_check
+  check (event_type in ('CREACION', 'MODIFICACION', 'ESTADO', 'RESPONSABLE', 'PRODUCCION',
+                        'PAGO', 'MATERIAL', 'ARCHIVO', 'ENTREGA', 'CIERRE', 'DOCUMENTO', 'EGRESO'));
+
+-- Recibos de egreso: pagos a joyeros, siempre ligados a un pedido. No se eliminan: se anulan.
+create table public.jeweler_payments (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references public.organizations (id) on delete cascade,
+  branch_id     uuid not null references public.branches (id),
+  number        text not null,
+  jeweler_id    uuid not null references public.jewelers (id),
+  order_id      uuid not null references public.orders (id),
+  payment_date  date not null default current_date,
+  amount        numeric(12, 2) not null check (amount > 0),
+  currency      text not null default 'PEN' check (currency in ('PEN', 'USD')),
+  method        text not null check (method in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'OTRO')),
+  reference     text,
+  concept       text not null check (length(trim(concept)) > 0),
+  voided        boolean not null default false,
+  voided_at     timestamptz,
+  voided_by     uuid references public.profiles (id),
+  void_reason   text,
+  created_by    uuid references public.profiles (id),     -- autorizado por
+  created_at    timestamptz not null default now(),
+  unique (org_id, number)
+);
+create index jp_jeweler_idx on public.jeweler_payments (jeweler_id, payment_date);
+create index jp_order_idx on public.jeweler_payments (order_id);
+create index jp_org_date_idx on public.jeweler_payments (org_id, payment_date);
+create trigger aa_subscription_guard before insert or update or delete on public.jeweler_payments
+  for each row execute function public.enforce_org_writable();
+
+-- Precio de venta del día por material (S/ por unidad). Rige el último con fecha <= hoy.
+create table public.material_prices (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null references public.organizations (id) on delete cascade,
+  material_id  uuid not null references public.materials (id) on delete cascade,
+  price_date   date not null,
+  price        numeric(12, 2) not null check (price > 0),
+  created_by   uuid references public.profiles (id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (material_id, price_date)
+);
+create index material_prices_org_idx on public.material_prices (org_id, price_date desc);
+create trigger aa_subscription_guard before insert or update or delete on public.material_prices
+  for each row execute function public.enforce_org_writable();
+
+-- ---------------------------------------------------------------------
+-- Formato de montos con moneda
+-- ---------------------------------------------------------------------
+create or replace function public.format_money(p_amount numeric, p_currency text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case when p_currency = 'USD' then 'US$ ' else 'S/ ' end || to_char(p_amount, 'FM999G999G990D00');
+$$;
+
+-- ---------------------------------------------------------------------
+-- Pagos: moneda del pedido y recibo de ingreso (RI) en cada cobro
+-- ---------------------------------------------------------------------
+create or replace function public.payments_before_write()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_balance  numeric;
+  v_status   text;
+  v_currency text;
+begin
+  -- Asignar el número de recibo a un pago anterior a los recibos no es una modificación del pago
+  if tg_op = 'UPDATE' and old.receipt_number is null and new.receipt_number is not null
+     and (to_jsonb(new) - 'receipt_number') = (to_jsonb(old) - 'receipt_number') then
+    return new;
+  end if;
+
+  perform public.assert_order_editable(new.order_id);
+
+  if tg_op = 'INSERT' then
+    select balance, status, currency into v_balance, v_status, v_currency
+      from public.orders where id = new.order_id for update;
+    new.currency := v_currency;
+    if new.amount > v_balance and not new.overpayment_confirmed then
+      raise exception 'El monto (%) supera el saldo pendiente (%). Confirme explícitamente el pago.',
+        public.format_money(new.amount, v_currency), public.format_money(v_balance, v_currency);
+    end if;
+    new.voided := false;
+    new.received_from := nullif(trim(new.received_from), '');
+    new.receipt_number := public.next_document_number(new.org_id, 'RI');
+  else
+    if (new.order_id, new.amount, new.method, new.payment_date, new.currency) is distinct from
+       (old.order_id, old.amount, old.method, old.payment_date, old.currency) then
+      raise exception 'Un pago registrado no se puede modificar; anúlelo y registre uno nuevo.';
+    end if;
+    if old.receipt_number is not null and new.receipt_number is distinct from old.receipt_number then
+      raise exception 'El número de recibo no se puede cambiar.';
+    end if;
+    if old.voided and not new.voided then
+      raise exception 'Un pago anulado no se puede reactivar.';
+    end if;
+    if new.voided and not old.voided then
+      if length(trim(coalesce(new.void_reason, ''))) = 0 then
+        raise exception 'Indique el motivo de la anulación.';
+      end if;
+      new.voided_at := now();
+      new.voided_by := auth.uid();
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.payments_after_write()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_number text;
+begin
+  if tg_op = 'UPDATE' and new.voided = old.voided then
+    return null;      -- p. ej. asignación del número de recibo
+  end if;
+
+  update public.orders o
+     set amount_paid = coalesce((select sum(amount) from public.payments
+                                  where order_id = new.order_id and not voided), 0)
+   where o.id = new.order_id;
+
+  select number into v_number from public.orders where id = new.order_id;
+  if tg_op = 'INSERT' then
+    perform public.log_order_event(new.order_id, 'PAGO',
+      public.current_user_name() || ' registró ' ||
+      case when new.is_advance then 'un adelanto' else 'un pago' end || ' de ' ||
+      public.format_money(new.amount, new.currency) ||
+      ' (' || initcap(lower(new.method)) || ') en ' || v_number ||
+      coalesce('. Recibo ' || new.receipt_number, '') || '.',
+      null, new.amount::text);
+  elsif new.voided and not old.voided then
+    perform public.log_order_event(new.order_id, 'PAGO',
+      public.current_user_name() || ' anuló un pago de ' || public.format_money(new.amount, new.currency) ||
+      ' en ' || v_number || coalesce(' (recibo ' || new.receipt_number || ')', '') ||
+      '. Motivo: ' || new.void_reason || '.',
+      new.amount::text, null);
+  end if;
+  return null;
+end;
+$$;
+
+-- Columnas calculadas para el recibo (PostgREST: select=*,balance_after,created_by_name)
+-- Saldo del pedido después de este pago (0 o menos = este pago lo canceló).
+create or replace function public.balance_after(p public.payments)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select o.total - coalesce((
+           select sum(x.amount) from public.payments x
+            where x.order_id = p.order_id and not x.voided
+              and (x.payment_date, x.created_at) <= (p.payment_date, p.created_at)), 0)
+    from public.orders o where o.id = p.order_id;
+$$;
+
+create or replace function public.created_by_name(p public.payments)
+returns text
+language sql
+stable
+set search_path = public
+as $$
+  select full_name from public.profiles where id = p.created_by;
+$$;
+
+-- Recibo de ingreso de un pago (asigna número a los pagos anteriores a esta versión)
+create or replace function public.issue_payment_receipt(p_payment_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org      uuid := public.current_org_id();
+  v_order    uuid;
+  v_receipt  text;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR') then
+    raise exception 'No tiene permisos para emitir recibos.';
+  end if;
+  select order_id, receipt_number into v_order, v_receipt
+    from public.payments where id = p_payment_id and org_id = v_org for update;
+  if v_order is null or not public.can_view_order(v_order) then
+    raise exception 'Pago no encontrado.';
+  end if;
+  if v_receipt is null then
+    if not public.org_can_write(v_org) then
+      raise exception 'El plan de su empresa está vencido: el sistema está en modo solo lectura. Regularice el pago para seguir registrando información.';
+    end if;
+    v_receipt := public.next_document_number(v_org, 'RI');
+    update public.payments set receipt_number = v_receipt where id = p_payment_id;
+  end if;
+  return v_receipt;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Cotizaciones y pedidos: moneda por documento y peso por ítem
+-- ---------------------------------------------------------------------
+create or replace function public.save_quotation(p_id uuid, p_header jsonb, p_items jsonb)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_id uuid := p_id;
+  v_currency text := coalesce(nullif(p_header ->> 'currency', ''), 'PEN');
+begin
+  if jsonb_array_length(coalesce(p_items, '[]'::jsonb)) = 0 then
+    raise exception 'La cotización debe tener al menos un ítem.';
+  end if;
+  if v_currency not in ('PEN', 'USD') then
+    raise exception 'Moneda no válida.';
+  end if;
+
+  if v_id is null then
+    insert into public.quotations (branch_id, customer_id, service_type_id, issue_date, expiry_date, title, main_material,
+                                   estimated_weight, stone, size, notes, terms, tax_rate, currency)
+    values (nullif(p_header ->> 'branch_id', '')::uuid,
+            (p_header ->> 'customer_id')::uuid, (p_header ->> 'service_type_id')::uuid,
+            coalesce((p_header ->> 'issue_date')::date, current_date),
+            (p_header ->> 'expiry_date')::date,
+            p_header ->> 'title', p_header ->> 'main_material',
+            (p_header ->> 'estimated_weight')::numeric, p_header ->> 'stone', p_header ->> 'size',
+            p_header ->> 'notes', p_header ->> 'terms',
+            coalesce((p_header ->> 'tax_rate')::numeric, 18), v_currency)
+    returning id into v_id;
+  else
+    update public.quotations
+       set branch_id = coalesce(nullif(p_header ->> 'branch_id', '')::uuid, branch_id),
+           customer_id = (p_header ->> 'customer_id')::uuid,
+           service_type_id = (p_header ->> 'service_type_id')::uuid,
+           issue_date = (p_header ->> 'issue_date')::date,
+           expiry_date = (p_header ->> 'expiry_date')::date,
+           title = p_header ->> 'title',
+           main_material = p_header ->> 'main_material',
+           estimated_weight = (p_header ->> 'estimated_weight')::numeric,
+           stone = p_header ->> 'stone',
+           size = p_header ->> 'size',
+           notes = p_header ->> 'notes',
+           terms = p_header ->> 'terms',
+           tax_rate = coalesce((p_header ->> 'tax_rate')::numeric, tax_rate),
+           currency = v_currency
+     where id = v_id;
+    if not found then
+      raise exception 'Cotización no encontrada o sin permisos.';
+    end if;
+    delete from public.quotation_items where quotation_id = v_id;
+  end if;
+
+  insert into public.quotation_items (quotation_id, position, description, detail, material_id, material_name,
+                                      quantity, unit, weight, unit_price, discount)
+  select v_id, (i.ord - 1)::integer, i.item ->> 'description', i.item ->> 'detail',
+         nullif(i.item ->> 'material_id', '')::uuid, i.item ->> 'material_name',
+         (i.item ->> 'quantity')::numeric, coalesce(i.item ->> 'unit', 'und'),
+         nullif(i.item ->> 'weight', '')::numeric,
+         (i.item ->> 'unit_price')::numeric, coalesce((i.item ->> 'discount')::numeric, 0)
+    from jsonb_array_elements(p_items) with ordinality as i(item, ord);
+
+  return v_id;
+end;
+$$;
+
+create or replace function public.duplicate_quotation(p_id uuid)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_new uuid;
+  v_days integer;
+begin
+  select coalesce(s.quote_validity_days, 15) into v_days
+    from public.settings s where s.org_id = public.current_org_id();
+
+  insert into public.quotations (branch_id, customer_id, service_type_id, issue_date, expiry_date, title, main_material,
+                                 estimated_weight, stone, size, notes, terms, tax_rate, currency)
+  select branch_id, customer_id, service_type_id, current_date, current_date + coalesce(v_days, 15), title, main_material,
+         estimated_weight, stone, size, notes, terms, tax_rate, currency
+    from public.quotations where id = p_id
+  returning id into v_new;
+
+  if v_new is null then
+    raise exception 'Cotización no encontrada o sin permisos.';
+  end if;
+
+  insert into public.quotation_items (quotation_id, position, description, detail, material_id, material_name,
+                                      quantity, unit, weight, unit_price, discount)
+  select v_new, position, description, detail, material_id, material_name, quantity, unit, weight, unit_price, discount
+    from public.quotation_items where quotation_id = p_id;
+
+  return v_new;
+end;
+$$;
+
+create or replace function public.convert_quotation_to_order(
+  p_quotation_id uuid,
+  p_assigned_to uuid default null,
+  p_due_date date default null,
+  p_priority text default 'MEDIA',
+  p_create_stages boolean default true)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  q public.quotations%rowtype;
+  v_order_id uuid;
+begin
+  select * into q from public.quotations where id = p_quotation_id for update;
+  if not found then
+    raise exception 'Cotización no encontrada o sin permisos.';
+  end if;
+  if q.status <> 'APROBADA' then
+    raise exception 'Solo una cotización aprobada puede convertirse en pedido.';
+  end if;
+  if q.order_id is not null then
+    raise exception 'La cotización % ya fue convertida en pedido.', q.number;
+  end if;
+
+  insert into public.orders (org_id, branch_id, customer_id, quotation_id, service_type_id, status, priority, title,
+                             description, main_material, estimated_weight, stone, size, notes, assigned_to,
+                             start_date, due_date, tax_rate, currency)
+  values (q.org_id, q.branch_id, q.customer_id, q.id, q.service_type_id, 'APROBADO', coalesce(p_priority, 'MEDIA'),
+          q.title,
+          (select string_agg(description || coalesce(': ' || detail, ''), E'\n' order by position)
+             from public.quotation_items where quotation_id = q.id),
+          q.main_material, q.estimated_weight, q.stone, q.size, q.notes, p_assigned_to, current_date,
+          p_due_date, q.tax_rate, q.currency)
+  returning id into v_order_id;
+
+  insert into public.order_items (org_id, order_id, position, description, detail, material_id, material_name,
+                                  quantity, unit, weight, unit_price, discount)
+  select org_id, v_order_id, position, description, detail, material_id, material_name,
+         quantity, unit, weight, unit_price, discount
+    from public.quotation_items where quotation_id = q.id;
+
+  update public.quotations set order_id = v_order_id where id = q.id;
+
+  if p_create_stages then
+    perform public.create_order_stages(v_order_id);
+  end if;
+
+  return v_order_id;
+end;
+$$;
+
+create or replace function public.save_order(p_id uuid, p_header jsonb, p_items jsonb)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_id uuid := p_id;
+  v_currency text := coalesce(nullif(p_header ->> 'currency', ''), 'PEN');
+begin
+  if jsonb_array_length(coalesce(p_items, '[]'::jsonb)) = 0 then
+    raise exception 'El pedido debe tener al menos un ítem.';
+  end if;
+  if v_currency not in ('PEN', 'USD') then
+    raise exception 'Moneda no válida.';
+  end if;
+
+  if v_id is null then
+    insert into public.orders (branch_id, customer_id, service_type_id, priority, title, description, main_material,
+                               estimated_weight, stone, size, notes, assigned_to, start_date, due_date, tax_rate, currency)
+    values (nullif(p_header ->> 'branch_id', '')::uuid,
+            (p_header ->> 'customer_id')::uuid, (p_header ->> 'service_type_id')::uuid,
+            coalesce(p_header ->> 'priority', 'MEDIA'), p_header ->> 'title', p_header ->> 'description',
+            p_header ->> 'main_material', (p_header ->> 'estimated_weight')::numeric, p_header ->> 'stone',
+            p_header ->> 'size', p_header ->> 'notes', nullif(p_header ->> 'assigned_to', '')::uuid,
+            coalesce((p_header ->> 'start_date')::date, current_date), (p_header ->> 'due_date')::date,
+            coalesce((p_header ->> 'tax_rate')::numeric, 18), v_currency)
+    returning id into v_id;
+  else
+    if exists (select 1 from public.orders where id = v_id and currency <> v_currency)
+       and exists (select 1 from public.payments where order_id = v_id and not voided) then
+      raise exception 'No se puede cambiar la moneda de un pedido con pagos registrados.';
+    end if;
+    update public.orders
+       set branch_id = coalesce(nullif(p_header ->> 'branch_id', '')::uuid, branch_id),
+           customer_id = (p_header ->> 'customer_id')::uuid,
+           service_type_id = (p_header ->> 'service_type_id')::uuid,
+           priority = coalesce(p_header ->> 'priority', priority),
+           title = p_header ->> 'title',
+           description = p_header ->> 'description',
+           main_material = p_header ->> 'main_material',
+           estimated_weight = (p_header ->> 'estimated_weight')::numeric,
+           stone = p_header ->> 'stone',
+           size = p_header ->> 'size',
+           notes = p_header ->> 'notes',
+           assigned_to = nullif(p_header ->> 'assigned_to', '')::uuid,
+           start_date = coalesce((p_header ->> 'start_date')::date, start_date),
+           due_date = (p_header ->> 'due_date')::date,
+           tax_rate = coalesce((p_header ->> 'tax_rate')::numeric, tax_rate),
+           currency = v_currency
+     where id = v_id;
+    if not found then
+      raise exception 'Pedido no encontrado o sin permisos.';
+    end if;
+    delete from public.order_items where order_id = v_id;
+  end if;
+
+  insert into public.order_items (order_id, position, description, detail, material_id, material_name,
+                                  quantity, unit, weight, unit_price, discount)
+  select v_id, (i.ord - 1)::integer, i.item ->> 'description', i.item ->> 'detail',
+         nullif(i.item ->> 'material_id', '')::uuid, i.item ->> 'material_name',
+         (i.item ->> 'quantity')::numeric, coalesce(i.item ->> 'unit', 'und'),
+         nullif(i.item ->> 'weight', '')::numeric,
+         (i.item ->> 'unit_price')::numeric, coalesce((i.item ->> 'discount')::numeric, 0)
+    from jsonb_array_elements(p_items) with ordinality as i(item, ord);
+
+  return v_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Proforma y orden de producción: un número por pedido; las reimpresiones lo reutilizan
+-- ---------------------------------------------------------------------
+create or replace function public.issue_order_document(p_order_id uuid, p_doc_type text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_number  text;
+  v_order   text;
+begin
+  if p_doc_type not in ('PRO', 'OP') then
+    raise exception 'Tipo de documento no válido.';
+  end if;
+  if v_org is null
+     or (p_doc_type = 'PRO' and not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR'))
+     or (p_doc_type = 'OP' and not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR')) then
+    raise exception 'No tiene permisos para emitir este documento.';
+  end if;
+  if not public.can_view_order(p_order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+
+  select number, case when p_doc_type = 'PRO' then proforma_number else production_number end
+    into v_order, v_number
+    from public.orders where id = p_order_id for update;
+
+  if v_number is null then
+    if not public.org_can_write(v_org) then
+      raise exception 'El plan de su empresa está vencido: el sistema está en modo solo lectura. Regularice el pago para seguir registrando información.';
+    end if;
+    v_number := public.next_document_number(v_org, p_doc_type);
+    if p_doc_type = 'PRO' then
+      update public.orders set proforma_number = v_number, proforma_issued_at = now() where id = p_order_id;
+    else
+      update public.orders set production_number = v_number, production_issued_at = now() where id = p_order_id;
+    end if;
+    perform public.log_order_event(p_order_id, 'DOCUMENTO',
+      public.current_user_name() || ' emitió ' ||
+      case when p_doc_type = 'PRO' then 'la proforma ' else 'la orden de producción ' end ||
+      v_number || ' del pedido ' || v_order || '.', null, v_number);
+  end if;
+  return v_number;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Orden de producción (taller): joyero, material entregado, indicaciones y acabado
+-- ---------------------------------------------------------------------
+create or replace function public.save_order_production(
+  p_order_id                 uuid,
+  p_jeweler_id               uuid default null,
+  p_material_delivered_at    date default null,
+  p_material_weight_out      numeric default null,
+  p_production_instructions  text default null,
+  p_product_delivered_at     date default null,
+  p_weight_returned          numeric default null,
+  p_production_notes         text default null)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org       uuid := public.current_org_id();
+  o           public.orders%rowtype;
+  v_old_name  text;
+  v_new_name  text;
+  v_actor     text := public.current_user_name();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR') then
+    raise exception 'No tiene permisos para registrar la orden de producción.';
+  end if;
+  if not public.can_view_order(p_order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+  perform public.assert_order_editable(p_order_id);
+
+  if p_jeweler_id is not null and not exists (select 1 from public.jewelers where id = p_jeweler_id and org_id = v_org) then
+    raise exception 'El joyero indicado no existe.';
+  end if;
+  if coalesce(p_material_weight_out, 1) <= 0 or coalesce(p_weight_returned, 1) <= 0 then
+    raise exception 'Los pesos deben ser mayores que cero.';
+  end if;
+  if p_weight_returned is not null and p_material_weight_out is null then
+    raise exception 'Registre primero el peso del material entregado al joyero.';
+  end if;
+  if p_product_delivered_at is not null and p_material_delivered_at is not null
+     and p_product_delivered_at < p_material_delivered_at then
+    raise exception 'La fecha de entrega del producto no puede ser anterior a la entrega del material.';
+  end if;
+
+  select * into o from public.orders where id = p_order_id for update;
+
+  update public.orders
+     set jeweler_id = p_jeweler_id,
+         material_delivered_at = p_material_delivered_at,
+         material_weight_out = p_material_weight_out,
+         production_instructions = nullif(trim(p_production_instructions), ''),
+         product_delivered_at = p_product_delivered_at,
+         weight_returned = p_weight_returned,
+         production_notes = nullif(trim(p_production_notes), '')
+   where id = p_order_id;
+
+  if o.jeweler_id is distinct from p_jeweler_id then
+    select full_name into v_old_name from public.jewelers where id = o.jeweler_id;
+    select full_name into v_new_name from public.jewelers where id = p_jeweler_id;
+    perform public.log_order_event(p_order_id, 'PRODUCCION',
+      v_actor || ' asignó el pedido ' || o.number || ' al joyero ' || coalesce(v_new_name, '(sin joyero)') ||
+      coalesce(' (antes: ' || v_old_name || ')', '') || '.', v_old_name, v_new_name);
+  end if;
+  if o.material_weight_out is distinct from p_material_weight_out and p_material_weight_out is not null then
+    perform public.log_order_event(p_order_id, 'PRODUCCION',
+      v_actor || ' registró ' || to_char(p_material_weight_out, 'FM999G990D00') || ' g de material entregado al taller.');
+  end if;
+  if o.weight_returned is distinct from p_weight_returned and p_weight_returned is not null then
+    perform public.log_order_event(p_order_id, 'PRODUCCION',
+      v_actor || ' registró ' || to_char(p_weight_returned, 'FM999G990D00') ||
+      ' g en el producto entregado por el taller (merma ' ||
+      to_char(p_material_weight_out - p_weight_returned, 'FM999G990D00') || ' g).');
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Joyeros
+-- ---------------------------------------------------------------------
+create or replace function public.jewelers_list(p_include_inactive boolean default false)
+returns table (
+  id uuid, full_name text, document_number text, phone text, specialty text, notes text, active boolean,
+  created_at timestamptz, updated_at timestamptz, active_orders integer, paid_pen numeric, paid_usd numeric
+)
+language sql
+stable
+set search_path = public
+as $$
+  select j.id, j.full_name, j.document_number, j.phone, j.specialty, j.notes, j.active, j.created_at, j.updated_at,
+         (select count(*)::integer from public.orders o
+           where o.jeweler_id = j.id and o.status not in ('ENTREGADO', 'CERRADO', 'CANCELADO')),
+         case when public.has_role('ADMIN', 'GERENTE') then
+           (select coalesce(sum(amount), 0) from public.jeweler_payments
+             where jeweler_id = j.id and not voided and currency = 'PEN') end,
+         case when public.has_role('ADMIN', 'GERENTE') then
+           (select coalesce(sum(amount), 0) from public.jeweler_payments
+             where jeweler_id = j.id and not voided and currency = 'USD') end
+    from public.jewelers j
+   where j.org_id = public.current_org_id() and (p_include_inactive or j.active)
+   order by j.active desc, j.full_name;
+$$;
+
+create or replace function public.save_jeweler(
+  p_id               uuid,
+  p_full_name        text,
+  p_document_number  text default null,
+  p_phone            text default null,
+  p_specialty        text default null,
+  p_notes            text default null,
+  p_active           boolean default true)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_org   uuid := public.current_org_id();
+  v_id    uuid := p_id;
+  v_name  text := trim(coalesce(p_full_name, ''));
+  v_doc   text := nullif(trim(p_document_number), '');
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'SUPERVISOR') then
+    raise exception 'No tiene permisos para registrar joyeros.';
+  end if;
+  if length(v_name) = 0 then
+    raise exception 'Indique el nombre del joyero.';
+  end if;
+  if v_doc is not null and v_doc !~ '^[0-9]+$' then
+    raise exception 'El DNI solo debe contener números.';
+  end if;
+  if v_doc is not null and exists (select 1 from public.jewelers
+                                    where org_id = v_org and document_number = v_doc and (v_id is null or id <> v_id)) then
+    raise exception 'Ya existe un joyero con el DNI %.', v_doc;
+  end if;
+
+  if v_id is null then
+    insert into public.jewelers (org_id, full_name, document_number, phone, specialty, notes, active)
+    values (v_org, v_name, v_doc, nullif(trim(p_phone), ''), nullif(trim(p_specialty), ''),
+            nullif(trim(p_notes), ''), coalesce(p_active, true))
+    returning id into v_id;
+  else
+    update public.jewelers
+       set full_name = v_name, document_number = v_doc, phone = nullif(trim(p_phone), ''),
+           specialty = nullif(trim(p_specialty), ''), notes = nullif(trim(p_notes), ''),
+           active = coalesce(p_active, active)
+     where id = v_id and org_id = v_org;
+    if not found then
+      raise exception 'Joyero no encontrado.';
+    end if;
+  end if;
+  return v_id;
+end;
+$$;
+
+-- Recibo de egreso: pago a un joyero por un pedido (en la moneda del pedido)
+create or replace function public.register_jeweler_payment(
+  p_order_id      uuid,
+  p_jeweler_id    uuid,
+  p_amount        numeric,
+  p_method        text,
+  p_concept       text,
+  p_payment_date  date default null,
+  p_reference     text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org      uuid := public.current_org_id();
+  v_id       uuid := gen_random_uuid();
+  v_number   text;
+  v_jeweler  text;
+  o          public.orders%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar pagos a joyeros.';
+  end if;
+  if not public.can_view_order(p_order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+  perform public.assert_order_editable(p_order_id);
+
+  select full_name into v_jeweler from public.jewelers where id = p_jeweler_id and org_id = v_org;
+  if v_jeweler is null then
+    raise exception 'Seleccione un joyero válido.';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'El monto debe ser mayor que cero.';
+  end if;
+  if length(trim(coalesce(p_concept, ''))) = 0 then
+    raise exception 'Indique el detalle del pago.';
+  end if;
+  if p_method not in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'OTRO') then
+    raise exception 'Método de pago no válido.';
+  end if;
+
+  select * into o from public.orders where id = p_order_id;
+  v_number := public.next_document_number(v_org, 'RE');
+  insert into public.jeweler_payments (id, org_id, branch_id, number, jeweler_id, order_id, payment_date, amount, currency,
+                                       method, reference, concept, created_by)
+  values (v_id, v_org, o.branch_id, v_number, p_jeweler_id, p_order_id, coalesce(p_payment_date, current_date), p_amount,
+          o.currency, p_method, nullif(trim(p_reference), ''), trim(p_concept), auth.uid());
+
+  perform public.log_order_event(p_order_id, 'EGRESO',
+    public.current_user_name() || ' pagó ' || public.format_money(p_amount, o.currency) || ' al joyero ' || v_jeweler ||
+    ' por el pedido ' || o.number || '. Recibo ' || v_number || '.', null, p_amount::text);
+  return jsonb_build_object('id', v_id, 'number', v_number);
+end;
+$$;
+
+create or replace function public.void_jeweler_payment(p_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org  uuid := public.current_org_id();
+  jp     public.jeweler_payments%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede anular pagos a joyeros.';
+  end if;
+  select * into jp from public.jeweler_payments where id = p_id and org_id = v_org for update;
+  if not found then
+    raise exception 'Recibo no encontrado.';
+  end if;
+  if jp.voided then
+    raise exception 'El recibo ya está anulado.';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Indique el motivo de la anulación.';
+  end if;
+  perform public.assert_order_editable(jp.order_id);
+
+  update public.jeweler_payments
+     set voided = true, voided_at = now(), voided_by = auth.uid(), void_reason = trim(p_reason)
+   where id = p_id;
+
+  perform public.log_order_event(jp.order_id, 'EGRESO',
+    public.current_user_name() || ' anuló el recibo de egreso ' || jp.number || ' (' ||
+    public.format_money(jp.amount, jp.currency) || ') del pedido ' ||
+    (select number from public.orders where id = jp.order_id) || '. Motivo: ' || trim(p_reason) || '.',
+    jp.amount::text, null);
+end;
+$$;
+
+-- Pagos a joyeros (por joyero, pedido y periodo)
+create or replace function public.jeweler_payments_list(
+  p_jeweler_id      uuid default null,
+  p_order_id        uuid default null,
+  p_from            date default null,
+  p_to              date default null,
+  p_include_voided  boolean default false)
+returns table (
+  id uuid, number text, jeweler_id uuid, jeweler_name text, jeweler_document text,
+  order_id uuid, order_number text, order_title text, customer_name text,
+  payment_date date, amount numeric, currency text, method text, reference text, concept text,
+  voided boolean, voided_at timestamptz, void_reason text, voided_by_name text,
+  branch_id uuid, branch_name text, created_by_name text, created_at timestamptz
+)
+language sql
+stable
+set search_path = public
+as $$
+  select jp.id, jp.number, jp.jeweler_id, j.full_name, j.document_number,
+         jp.order_id, o.number, o.title, c.full_name,
+         jp.payment_date, jp.amount, jp.currency, jp.method, jp.reference, jp.concept,
+         jp.voided, jp.voided_at, jp.void_reason, vb.full_name,
+         jp.branch_id, b.name, cb.full_name, jp.created_at
+    from public.jeweler_payments jp
+    join public.jewelers j on j.id = jp.jeweler_id
+    join public.orders o on o.id = jp.order_id
+    join public.customers c on c.id = o.customer_id
+    join public.branches b on b.id = jp.branch_id
+    left join public.profiles vb on vb.id = jp.voided_by
+    left join public.profiles cb on cb.id = jp.created_by
+   where (p_jeweler_id is null or jp.jeweler_id = p_jeweler_id)
+     and (p_order_id is null or jp.order_id = p_order_id)
+     and (p_from is null or jp.payment_date >= p_from)
+     and (p_to is null or jp.payment_date <= p_to)
+     and (p_include_voided or not jp.voided)
+   order by jp.payment_date desc, jp.created_at desc;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Precios del día
+-- ---------------------------------------------------------------------
+-- Columnas calculadas del material (select=*,day_price,day_price_date)
+create or replace function public.day_price(m public.materials)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select price from public.material_prices
+   where material_id = m.id and price_date <= current_date
+   order by price_date desc limit 1;
+$$;
+
+create or replace function public.day_price_date(m public.materials)
+returns date
+language sql
+stable
+set search_path = public
+as $$
+  select price_date from public.material_prices
+   where material_id = m.id and price_date <= current_date
+   order by price_date desc limit 1;
+$$;
+
+-- Precio vigente de cada material activo, con el anterior para ver la variación
+create or replace function public.material_prices_current()
+returns table (
+  material_id uuid, name text, type text, purity text, unit text, reference_cost numeric,
+  price numeric, price_date date, previous_price numeric, previous_date date, updated_by text
+)
+language sql
+stable
+set search_path = public
+as $$
+  select m.id, m.name, m.type, m.purity, m.unit, m.reference_cost,
+         dp.price, dp.price_date, prev.price, prev.price_date, pr.full_name
+    from public.materials m
+    left join lateral (
+      select p.price, p.price_date, p.created_by from public.material_prices p
+       where p.material_id = m.id and p.price_date <= current_date
+       order by p.price_date desc limit 1) dp on true
+    left join lateral (
+      select p.price, p.price_date from public.material_prices p
+       where p.material_id = m.id and p.price_date < dp.price_date
+       order by p.price_date desc limit 1) prev on true
+    left join public.profiles pr on pr.id = dp.created_by
+   where m.org_id = public.current_org_id() and m.active
+   order by case m.type when 'ORO' then 1 when 'PLATA' then 2 when 'PLATINO' then 3 else 4 end, m.name;
+$$;
+
+-- Registra (o corrige) los precios de una fecha. p_prices: [{"material_id": "...", "price": 285.5}, ...]
+create or replace function public.save_material_prices(p_price_date date, p_prices jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org   uuid := public.current_org_id();
+  v_date  date := coalesce(p_price_date, current_date);
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar precios.';
+  end if;
+  if v_date > current_date then
+    raise exception 'No se pueden registrar precios con fecha futura.';
+  end if;
+  if jsonb_typeof(p_prices) <> 'array' then
+    raise exception 'Lista de precios no válida.';
+  end if;
+
+  if not exists (select 1 from jsonb_array_elements(p_prices) x where x ->> 'price' is not null) then
+    raise exception 'Indique al menos un precio.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_prices) x
+              where x ->> 'price' is not null and (x ->> 'price')::numeric <= 0) then
+    raise exception 'Los precios deben ser mayores que cero.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_prices) x
+              where x ->> 'price' is not null
+                and not exists (select 1 from public.materials m
+                                 where m.id = nullif(x ->> 'material_id', '')::uuid and m.org_id = v_org)) then
+    raise exception 'Material no encontrado.';
+  end if;
+
+  insert into public.material_prices (org_id, material_id, price_date, price, created_by)
+  select v_org, (x ->> 'material_id')::uuid, v_date, (x ->> 'price')::numeric(12, 2), auth.uid()
+    from jsonb_array_elements(p_prices) x
+   where x ->> 'price' is not null
+  on conflict (material_id, price_date)
+  do update set price = excluded.price, created_by = excluded.created_by, updated_at = now();
+end;
+$$;
+
+create or replace function public.material_price_history(p_material_id uuid, p_limit integer default 60)
+returns table (price_date date, price numeric, updated_by text, updated_at timestamptz)
+language sql
+stable
+set search_path = public
+as $$
+  select p.price_date, p.price, pr.full_name, p.updated_at
+    from public.material_prices p
+    left join public.profiles pr on pr.id = p.created_by
+   where p.material_id = p_material_id and p.org_id = public.current_org_id()
+   order by p.price_date desc
+   limit coalesce(p_limit, 60);
+$$;
+
+-- ---------------------------------------------------------------------
+-- Dashboard: montos en soles y, aparte, los de pedidos en dólares (*_usd)
+-- ---------------------------------------------------------------------
+create or replace function public.get_dashboard(p_branch_id uuid default null)
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  with orders_b as (
+    select * from public.orders where p_branch_id is null or branch_id = p_branch_id
+  ),
+  active_orders as (
+    select * from orders_b where status not in ('ENTREGADO', 'CERRADO', 'CANCELADO')
+  ),
+  quotations_b as (
+    select * from public.quotations where p_branch_id is null or branch_id = p_branch_id
+  ),
+  payments_b as (
+    select * from public.payments where not voided and (p_branch_id is null or branch_id = p_branch_id)
+  ),
+  months as (
+    select date_trunc('month', current_date) - (n || ' month')::interval as m
+      from generate_series(0, 5) n
+  )
+  select jsonb_build_object(
+    'kpis', jsonb_build_object(
+      'active_orders',       (select count(*) from active_orders),
+      'in_production',       (select count(*) from active_orders where status in ('DISENO', 'PRODUCCION', 'CONTROL_CALIDAD')),
+      'ready_to_deliver',    (select count(*) from active_orders where status = 'LISTO_ENTREGA'),
+      'pending_quotations',  (select count(*) from quotations_b where status in ('BORRADOR', 'ENVIADA')),
+      'sales_month',         (select coalesce(sum(total), 0) from orders_b
+                               where currency = 'PEN' and status <> 'CANCELADO' and created_at >= date_trunc('month', current_date)),
+      'sales_month_usd',     (select coalesce(sum(total), 0) from orders_b
+                               where currency = 'USD' and status <> 'CANCELADO' and created_at >= date_trunc('month', current_date)),
+      'collected_month',     (select coalesce(sum(amount), 0) from payments_b
+                               where currency = 'PEN' and payment_date >= date_trunc('month', current_date)),
+      'collected_month_usd', (select coalesce(sum(amount), 0) from payments_b
+                               where currency = 'USD' and payment_date >= date_trunc('month', current_date)),
+      'receivable',          (select coalesce(sum(balance), 0) from orders_b
+                               where currency = 'PEN' and status <> 'CANCELADO' and balance > 0),
+      'receivable_usd',      (select coalesce(sum(balance), 0) from orders_b
+                               where currency = 'USD' and status <> 'CANCELADO' and balance > 0),
+      'overdue_orders',      (select count(*) from active_orders where due_date < current_date and status <> 'PAUSADO')
+    ),
+    'orders_by_status', (select coalesce(jsonb_agg(jsonb_build_object('status', status, 'count', c) order by c desc), '[]')
+                           from (select status, count(*) c from orders_b group by status) s),
+    'sales_by_month', (select jsonb_agg(jsonb_build_object(
+                          'month', to_char(m.m, 'YYYY-MM'),
+                          'sales', (select coalesce(sum(total), 0) from orders_b
+                                     where currency = 'PEN' and status <> 'CANCELADO' and date_trunc('month', created_at) = m.m),
+                          'collected', (select coalesce(sum(amount), 0) from payments_b
+                                         where currency = 'PEN' and date_trunc('month', payment_date) = m.m)) order by m.m)
+                         from months m),
+    'orders_by_service', (select coalesce(jsonb_agg(jsonb_build_object('service', st.name, 'count', c) order by c desc), '[]')
+                            from (select service_type_id, count(*) c from orders_b
+                                   where status <> 'CANCELADO' group by service_type_id) s
+                            join public.service_types st on st.id = s.service_type_id),
+    'production_by_stage', (select coalesce(jsonb_agg(jsonb_build_object('stage', name, 'position', position, 'count', c) order by position), '[]')
+                              from (select ops.name, min(ops.position) position, count(*) c
+                                      from public.order_production_stages ops
+                                      join active_orders o on o.id = ops.order_id
+                                     where ops.is_current
+                                     group by ops.name) s),
+    'upcoming_deliveries', (select coalesce(jsonb_agg(row_to_json(u) order by u.due_date), '[]')
+                              from (select o.id, o.number, c.full_name as customer_name, o.title, o.due_date,
+                                           o.status, o.balance, o.currency
+                                      from active_orders o join public.customers c on c.id = o.customer_id
+                                     where o.due_date is not null and o.status <> 'PAUSADO'
+                                     order by o.due_date limit 10) u),
+    'alerts', jsonb_build_object(
+      'overdue', (select coalesce(jsonb_agg(row_to_json(a)), '[]') from (
+                    select o.id, o.number, c.full_name as customer_name, o.due_date
+                      from active_orders o join public.customers c on c.id = o.customer_id
+                     where o.due_date < current_date and o.status <> 'PAUSADO'
+                     order by o.due_date limit 10) a),
+      'pending_quotations', (select coalesce(jsonb_agg(row_to_json(a)), '[]') from (
+                    select q.id, q.number, c.full_name as customer_name, q.expiry_date, q.total, q.currency
+                      from quotations_b q join public.customers c on c.id = q.customer_id
+                     where q.status in ('BORRADOR', 'ENVIADA')
+                     order by q.expiry_date limit 10) a),
+      'pending_payments', (select coalesce(jsonb_agg(row_to_json(a)), '[]') from (
+                    select o.id, o.number, c.full_name as customer_name, o.balance, o.currency
+                      from orders_b o join public.customers c on c.id = o.customer_id
+                     where o.status in ('LISTO_ENTREGA', 'ENTREGADO') and o.balance > 0
+                     order by o.balance desc limit 10) a),
+      'upcoming', (select coalesce(jsonb_agg(row_to_json(a)), '[]') from (
+                    select o.id, o.number, c.full_name as customer_name, o.due_date
+                      from active_orders o join public.customers c on c.id = o.customer_id
+                     where o.due_date between current_date and current_date + 7
+                     order by o.due_date limit 10) a)
+    )
+  );
+$$;
+
+-- ---------------------------------------------------------------------
+-- Reportes: moneda en cada fila y filtro opcional por moneda
+-- ---------------------------------------------------------------------
+drop function public.report_sales(date, date, uuid, uuid, uuid, uuid);
+drop function public.report_receivables(uuid, uuid);
+drop function public.report_collections(date, date, text, boolean, uuid);
+drop function public.report_order_deadlines(integer, uuid, uuid);
+
+create or replace function public.report_sales(
+  p_from date,
+  p_to date,
+  p_service_type_id uuid default null,
+  p_customer_id uuid default null,
+  p_assigned_to uuid default null,
+  p_branch_id uuid default null,
+  p_currency text default null
+)
+returns table (
+  id uuid, number text, order_date date, branch_name text, customer_name text, service_name text, title text,
+  assignee_name text, status text, subtotal numeric, discount_total numeric, tax_amount numeric,
+  total numeric, amount_paid numeric, balance numeric, currency text
+)
+language plpgsql
+stable
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform public.assert_report_access();
+  return query
+    select o.id, o.number, o.created_at::date, b.name, c.full_name, st.name, o.title,
+           pr.full_name, o.status, o.subtotal, o.discount_total, o.tax_amount,
+           o.total, o.amount_paid, o.balance, o.currency
+      from public.orders o
+      join public.branches b on b.id = o.branch_id
+      join public.customers c on c.id = o.customer_id
+      join public.service_types st on st.id = o.service_type_id
+      left join public.profiles pr on pr.id = o.assigned_to
+     where o.status <> 'CANCELADO'
+       and o.created_at::date between p_from and p_to
+       and (p_service_type_id is null or o.service_type_id = p_service_type_id)
+       and (p_customer_id is null or o.customer_id = p_customer_id)
+       and (p_assigned_to is null or o.assigned_to = p_assigned_to)
+       and (p_branch_id is null or o.branch_id = p_branch_id)
+       and (p_currency is null or o.currency = p_currency)
+     order by o.created_at;
+end;
+$$;
+
+create or replace function public.report_receivables(
+  p_customer_id uuid default null, p_branch_id uuid default null, p_currency text default null)
+returns table (
+  id uuid, number text, branch_name text, customer_name text, customer_phone text, title text, status text,
+  due_date date, delivered_at timestamptz, reference_date date, total numeric, amount_paid numeric,
+  balance numeric, currency text, days_old integer, bucket text
+)
+language plpgsql
+stable
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform public.assert_report_access();
+  return query
+    select x.id, x.number, x.branch_name, x.customer_name, x.customer_phone, x.title, x.status, x.due_date,
+           x.delivered_at, x.reference_date, x.total, x.amount_paid, x.balance, x.currency, x.days_old,
+           case when x.days_old < 0 then 'POR_VENCER'
+                when x.days_old <= 30 then '0_30'
+                when x.days_old <= 60 then '31_60'
+                when x.days_old <= 90 then '61_90'
+                else 'MAS_90' end
+      from (
+        select o.id, o.number, b.name as branch_name, c.full_name as customer_name,
+               coalesce(c.whatsapp, c.phone) as customer_phone,
+               o.title, o.status, o.due_date, o.delivered_at,
+               coalesce(o.delivered_at::date, o.due_date, o.created_at::date) as reference_date,
+               o.total, o.amount_paid, o.balance, o.currency,
+               (current_date - coalesce(o.delivered_at::date, o.due_date, o.created_at::date))::integer as days_old
+          from public.orders o
+          join public.branches b on b.id = o.branch_id
+          join public.customers c on c.id = o.customer_id
+         where o.status <> 'CANCELADO'
+           and o.balance > 0
+           and (p_customer_id is null or o.customer_id = p_customer_id)
+           and (p_branch_id is null or o.branch_id = p_branch_id)
+           and (p_currency is null or o.currency = p_currency)
+      ) x
+     order by x.days_old desc;
+end;
+$$;
+
+create or replace function public.report_collections(
+  p_from date,
+  p_to date,
+  p_method text default null,
+  p_include_voided boolean default false,
+  p_branch_id uuid default null,
+  p_currency text default null
+)
+returns table (
+  id uuid, payment_date date, branch_name text, order_id uuid, order_number text, receipt_number text,
+  customer_name text, method text, reference text, is_advance boolean, amount numeric, currency text,
+  voided boolean, void_reason text, voided_by_name text, created_by_name text
+)
+language plpgsql
+stable
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform public.assert_report_access();
+  return query
+    select p.id, p.payment_date, b.name, o.id, o.number, p.receipt_number, c.full_name, p.method, p.reference,
+           p.is_advance, p.amount, p.currency, p.voided, p.void_reason, vb.full_name, cb.full_name
+      from public.payments p
+      join public.branches b on b.id = p.branch_id
+      join public.orders o on o.id = p.order_id
+      join public.customers c on c.id = o.customer_id
+      left join public.profiles vb on vb.id = p.voided_by
+      left join public.profiles cb on cb.id = p.created_by
+     where p.payment_date between p_from and p_to
+       and (p_method is null or p.method = p_method)
+       and (p_include_voided or not p.voided)
+       and (p_branch_id is null or p.branch_id = p_branch_id)
+       and (p_currency is null or p.currency = p_currency)
+     order by p.payment_date, p.created_at;
+end;
+$$;
+
+create or replace function public.report_order_deadlines(
+  p_days_ahead integer default 7,
+  p_assigned_to uuid default null,
+  p_branch_id uuid default null
+)
+returns table (
+  id uuid, number text, branch_name text, customer_name text, customer_phone text, title text, status text,
+  priority text, current_stage_name text, progress integer, assignee_name text, due_date date,
+  days_left integer, balance numeric, currency text
+)
+language plpgsql
+stable
+set search_path = public
+as $$
+#variable_conflict use_column
+begin
+  perform public.assert_report_access();
+  return query
+    select o.id, o.number, b.name, c.full_name, coalesce(c.whatsapp, c.phone), o.title, o.status, o.priority,
+           o.current_stage_name, o.progress, pr.full_name, o.due_date,
+           (o.due_date - current_date)::integer, o.balance, o.currency
+      from public.orders o
+      join public.branches b on b.id = o.branch_id
+      join public.customers c on c.id = o.customer_id
+      left join public.profiles pr on pr.id = o.assigned_to
+     where o.status not in ('ENTREGADO', 'CERRADO', 'CANCELADO')
+       and o.due_date is not null
+       and o.due_date <= current_date + greatest(coalesce(p_days_ahead, 7), 0)
+       and (p_assigned_to is null or o.assigned_to = p_assigned_to)
+       and (p_branch_id is null or o.branch_id = p_branch_id)
+     order by o.due_date,
+              case o.priority when 'URGENTE' then 1 when 'ALTA' then 2 when 'MEDIA' then 3 else 4 end;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- RLS
+-- ---------------------------------------------------------------------
+alter table public.jewelers          enable row level security;
+alter table public.jeweler_payments  enable row level security;
+alter table public.material_prices   enable row level security;
+
+create policy jewelers_select on public.jewelers for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR'));
+create policy jewelers_insert on public.jewelers for insert to authenticated
+  with check (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE', 'SUPERVISOR'));
+create policy jewelers_update on public.jewelers for update to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE', 'SUPERVISOR'))
+  with check (org_id = public.current_org_id());
+-- Sin delete: los joyeros se desactivan.
+
+-- Escritura solo vía register_jeweler_payment() y void_jeweler_payment().
+create policy jeweler_payments_select on public.jeweler_payments for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+         and branch_id in (select public.current_branch_ids()));
+
+-- Escritura solo vía save_material_prices().
+create policy material_prices_select on public.material_prices for select to authenticated
+  using (org_id = public.current_org_id());
+
+-- ---------------------------------------------------------------------
+-- Permisos de ejecución
+-- ---------------------------------------------------------------------
+revoke execute on function public.payments_before_write() from public, anon, authenticated;
+revoke execute on function public.payments_after_write() from public, anon, authenticated;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.format_money(numeric, text)',
+    'public.balance_after(public.payments)',
+    'public.created_by_name(public.payments)',
+    'public.issue_payment_receipt(uuid)',
+    'public.save_quotation(uuid, jsonb, jsonb)',
+    'public.duplicate_quotation(uuid)',
+    'public.convert_quotation_to_order(uuid, uuid, date, text, boolean)',
+    'public.save_order(uuid, jsonb, jsonb)',
+    'public.issue_order_document(uuid, text)',
+    'public.save_order_production(uuid, uuid, date, numeric, text, date, numeric, text)',
+    'public.jewelers_list(boolean)',
+    'public.save_jeweler(uuid, text, text, text, text, text, boolean)',
+    'public.register_jeweler_payment(uuid, uuid, numeric, text, text, date, text)',
+    'public.void_jeweler_payment(uuid, text)',
+    'public.jeweler_payments_list(uuid, uuid, date, date, boolean)',
+    'public.day_price(public.materials)',
+    'public.day_price_date(public.materials)',
+    'public.material_prices_current()',
+    'public.save_material_prices(date, jsonb)',
+    'public.material_price_history(uuid, integer)',
+    'public.get_dashboard(uuid)',
+    'public.report_sales(date, date, uuid, uuid, uuid, uuid, text)',
+    'public.report_receivables(uuid, uuid, text)',
+    'public.report_collections(date, date, text, boolean, uuid, text)',
+    'public.report_order_deadlines(integer, uuid, uuid)'
+  ] loop
+    execute format('revoke execute on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated, service_role', f);
+  end loop;
+end;
+$$;
+
+-- >>> 0013_endurecimiento_seguridad.sql
+-- =====================================================================
+-- 0013_endurecimiento_seguridad.sql
+-- Recomendaciones del linter de Supabase (aplicado el 2026-10-20):
+--   * search_path fijo en las funciones auxiliares que no lo tenían.
+--   * Las funciones de trigger no se exponen por la API (los triggers no verifican EXECUTE).
+--   * Ninguna función SECURITY DEFINER es ejecutable sin sesión, salvo
+--     submit_access_request (página pública de solicitud de acceso).
+--   * Funciones internas fuera del alcance de los usuarios con sesión.
+-- =====================================================================
+do $$
+declare r record;
+begin
+  -- 1) search_path fijo en las funciones señaladas
+  for r in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.proname in ('set_updated_at','protect_profile_fields','protect_material_stock',
+                  'order_status_label','stage_status_label','format_money','materials_initial_stock_before') loop
+    execute format('alter function %s set search_path = public', r.sig);
+  end loop;
+
+  -- 2) Funciones de trigger: nadie necesita llamarlas por la API (los triggers no verifican EXECUTE)
+  for r in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.prorettype in ('trigger'::regtype, 'event_trigger'::regtype) loop
+    execute format('revoke execute on function %s from public, anon, authenticated', r.sig);
+  end loop;
+
+  -- 3) SECURITY DEFINER restantes: fuera de anon (salvo la solicitud de acceso), se mantienen authenticated y service_role
+  for r in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.prosecdef
+              and p.prorettype not in ('trigger'::regtype, 'event_trigger'::regtype)
+              and p.proname <> 'submit_access_request' loop
+    execute format('grant execute on function %s to authenticated, service_role', r.sig);
+    execute format('revoke execute on function %s from public, anon', r.sig);
+  end loop;
+
+  -- 4) Funciones internas sin uso desde la app
+  for r in select p.oid::regprocedure sig from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+            where n.nspname = 'public' and p.proname in ('seed_org_catalogs','create_org_subscription','rls_auto_enable','handle_new_user') loop
+    execute format('revoke execute on function %s from authenticated', r.sig);
+  end loop;
+end;
+$$;
+
+-- >>> 0014_superadmin_sin_empresa.sql
+-- =====================================================================
+-- 0014_superadmin_sin_empresa.sql
+-- El superadministrador de la plataforma no pertenece a ninguna empresa
+-- (igual que en database/mssql/fix_superadmin_sin_empresa.sql).
+--   * Un usuario creado con raw_app_meta_data.platform_admin = 'true' queda
+--     como superadministrador sin perfil de empresa. app_metadata solo lo
+--     escribe el servidor (service_role / SQL), nunca el cliente.
+--   * El resto de handle_new_user() no cambia (invitación o primer usuario).
+-- =====================================================================
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inv     public.invitations%rowtype;
+  v_org_id  uuid;
+  v_name    text := coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), split_part(new.email, '@', 1));
+begin
+  -- Superadministrador de la plataforma: sin empresa ni perfil
+  if coalesce(new.raw_app_meta_data ->> 'platform_admin', '') = 'true' then
+    insert into public.platform_admins (user_id) values (new.id) on conflict do nothing;
+    return new;
+  end if;
+
+  select * into v_inv from public.invitations
+   where lower(email) = lower(new.email) and status = 'PENDING'
+   order by created_at desc limit 1;
+
+  if found then
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_inv.org_id, coalesce(nullif(trim(v_inv.full_name), ''), v_name), new.email, v_inv.role, true);
+
+    insert into public.user_branches (org_id, user_id, branch_id)
+    select v_inv.org_id, new.id, b.id
+      from public.branches b
+     where b.org_id = v_inv.org_id
+       and (case when coalesce(cardinality(v_inv.branch_ids), 0) = 0 then b.is_main
+                 else b.id = any (v_inv.branch_ids) end);
+    if not found then
+      insert into public.user_branches (org_id, user_id, branch_id)
+      values (v_inv.org_id, new.id, public.main_branch_id(v_inv.org_id));
+    end if;
+
+    update public.invitations set status = 'ACCEPTED', accepted_at = now() where id = v_inv.id;
+    return new;
+  end if;
+
+  if not exists (select 1 from public.organizations) then
+    insert into public.organizations (name) values ('Mi Orfebrería') returning id into v_org_id;
+    insert into public.settings (org_id) values (v_org_id);
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_org_id, v_name, new.email, 'ADMIN', true);
+    insert into public.user_branches (org_id, user_id, branch_id)
+    values (v_org_id, new.id, public.main_branch_id(v_org_id));
+    insert into public.platform_admins (user_id) values (new.id);
+    return new;
+  end if;
+
+  raise exception 'El registro es solo por invitación. Solicite acceso desde la página de inicio.';
+end;
+$$;
+
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
+-- >>> 0014_superadmin_unico.sql
+-- =====================================================================
+-- 0014 · Superadministrador único de la plataforma
+-- =====================================================================
+-- Solo jjcastilloo79@gmail.com administra la plataforma (aprobar solicitudes,
+-- empresas, planes y pagos de suscripción). Ningún otro usuario, aunque sea
+-- ADMIN de su empresa, puede figurar en platform_admins.
+--   * Se quitan los superadmins actuales que no sean ese correo.
+--   * Un trigger impide insertar a cualquier otro usuario.
+--   * Si ese correo se registra sin invitación, entra como superadmin sin empresa.
+-- =====================================================================
+
+create or replace function public.platform_owner_email()
+returns text
+language sql
+immutable
+as $$ select 'jjcastilloo79@gmail.com'::text $$;
+
+-- is_platform_admin() también exige el correo, por si alguien insertara una fila a mano.
+create or replace function public.is_platform_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1 from public.platform_admins pa
+      join auth.users u on u.id = pa.user_id
+     where pa.user_id = auth.uid()
+       and lower(u.email) = public.platform_owner_email()
+  );
+$$;
+
+create or replace function public.check_platform_admin()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not exists (select 1 from auth.users where id = new.user_id and lower(email) = public.platform_owner_email()) then
+    raise exception 'Solo % puede ser administrador de la plataforma.', public.platform_owner_email();
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists trg_platform_admins_check on public.platform_admins;
+create trigger trg_platform_admins_check
+  before insert or update on public.platform_admins
+  for each row execute function public.check_platform_admin();
+
+delete from public.platform_admins pa
+ using auth.users u
+ where u.id = pa.user_id and lower(u.email) <> public.platform_owner_email();
+
+insert into public.platform_admins (user_id)
+select id from auth.users where lower(email) = public.platform_owner_email()
+on conflict do nothing;
+
+-- Igual que en 0011, pero el superadmin es solo el dueño de la plataforma (sin empresa).
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inv     public.invitations%rowtype;
+  v_org_id  uuid;
+  v_name    text := coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), split_part(new.email, '@', 1));
+begin
+  if lower(new.email) = public.platform_owner_email() then
+    insert into public.platform_admins (user_id) values (new.id) on conflict do nothing;
+  end if;
+
+  select * into v_inv from public.invitations
+   where lower(email) = lower(new.email) and status = 'PENDING'
+   order by created_at desc limit 1;
+
+  if found then
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_inv.org_id, coalesce(nullif(trim(v_inv.full_name), ''), v_name), new.email, v_inv.role, true);
+
+    insert into public.user_branches (org_id, user_id, branch_id)
+    select v_inv.org_id, new.id, b.id
+      from public.branches b
+     where b.org_id = v_inv.org_id
+       and (case when coalesce(cardinality(v_inv.branch_ids), 0) = 0 then b.is_main
+                 else b.id = any (v_inv.branch_ids) end);
+    if not found then
+      insert into public.user_branches (org_id, user_id, branch_id)
+      values (v_inv.org_id, new.id, public.main_branch_id(v_inv.org_id));
+    end if;
+
+    update public.invitations set status = 'ACCEPTED', accepted_at = now() where id = v_inv.id;
+    return new;
+  end if;
+
+  -- El dueño de la plataforma no necesita empresa.
+  if lower(new.email) = public.platform_owner_email() then
+    return new;
+  end if;
+
+  if not exists (select 1 from public.organizations) then
+    insert into public.organizations (name) values ('Mi Orfebrería') returning id into v_org_id;
+    insert into public.settings (org_id) values (v_org_id);
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_org_id, v_name, new.email, 'ADMIN', true);
+    insert into public.user_branches (org_id, user_id, branch_id)
+    values (v_org_id, new.id, public.main_branch_id(v_org_id));
+    return new;
+  end if;
+
+  raise exception 'El registro es solo por invitación. Solicite acceso desde la página de inicio.';
+end;
+$$;
+
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+revoke execute on function public.check_platform_admin() from public, anon, authenticated;
+
+-- >>> 0015_estados_de_cuenta.sql
+-- =====================================================================
+-- 0015_estados_de_cuenta.sql
+-- Correos automáticos al cierre del día (Edge Function daily-statements):
+--   * Estado de cuenta al cliente que tuvo pagos, adelantos o anulaciones
+--     ese día: movimientos del día y saldo de sus pedidos.
+--   * Cierre de caja a los ADMIN y GERENTE: cobrado por método y moneda,
+--     adelantos, anulaciones y pagos a joyeros.
+-- Se activa por empresa (settings.daily_statements_enabled) a la hora
+-- elegida (hora de Lima). pg_cron llama a la función cada hora en punto.
+-- El cliente puede quedar fuera con customers.statement_email = false.
+-- =====================================================================
+
+create extension if not exists pg_cron with schema pg_catalog;
+create extension if not exists pg_net with schema extensions;
+
+alter table public.settings
+  add column daily_statements_enabled boolean not null default false,
+  add column daily_statements_hour integer not null default 20
+    check (daily_statements_hour between 0 and 23);
+
+alter table public.customers
+  add column statement_email boolean not null default true;
+
+-- Registro de envíos (evita duplicados si la tarea se reintenta y queda como constancia)
+create table public.statement_sends (
+  id              uuid primary key default gen_random_uuid(),
+  org_id          uuid not null references public.organizations (id) on delete cascade,
+  kind            text not null check (kind in ('CLIENTE', 'CIERRE')),
+  statement_date  date not null,
+  customer_id     uuid references public.customers (id) on delete set null,
+  recipients      text[] not null default '{}',
+  status          text not null check (status in ('ENVIADO', 'ERROR')),
+  detail          text,
+  created_at      timestamptz not null default now()
+);
+create index statement_sends_org_idx on public.statement_sends (org_id, created_at desc);
+create unique index statement_sends_once_uidx on public.statement_sends
+  (org_id, kind, statement_date, coalesce(customer_id, '00000000-0000-0000-0000-000000000000'::uuid))
+  where status = 'ENVIADO';
+
+alter table public.statement_sends enable row level security;
+-- Escritura solo desde la Edge Function (service_role).
+create policy statement_sends_select on public.statement_sends for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE'));
+
+-- ---------------------------------------------------------------------
+-- Secreto compartido entre pg_cron y la Edge Function (Vault)
+-- ---------------------------------------------------------------------
+select vault.create_secret(encode(extensions.gen_random_bytes(24), 'hex'), 'statements_cron_secret',
+                           'Encabezado x-cron-secret de la Edge Function daily-statements')
+ where not exists (select 1 from vault.secrets where name = 'statements_cron_secret');
+
+create or replace function public.check_statements_secret(p_secret text)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from vault.decrypted_secrets
+                  where name = 'statements_cron_secret' and decrypted_secret = p_secret);
+$$;
+
+-- ---------------------------------------------------------------------
+-- Datos para la Edge Function
+-- ---------------------------------------------------------------------
+-- Empresas a procesar ahora (hora de Lima). p_org fuerza una empresa (prueba manual).
+create or replace function public.statement_orgs_due(p_org uuid default null)
+returns table (org_id uuid, statement_date date)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.org_id, (now() at time zone 'America/Lima')::date
+    from public.settings s
+   where case when p_org is not null then s.org_id = p_org
+              else s.daily_statements_enabled
+                   and s.daily_statements_hour = extract(hour from now() at time zone 'America/Lima')::integer
+                   and public.org_access_state(s.org_id) not in ('SUSPENDED', 'CANCELLED') end;
+$$;
+
+-- Estados de cuenta pendientes de enviar y cierre de caja de una empresa en una fecha
+create or replace function public.daily_statement_data(p_org uuid, p_date date)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with pays as (
+    select p.*, o.number as order_number, o.title as order_title, o.customer_id
+      from public.payments p
+      join public.orders o on o.id = p.order_id
+     where p.org_id = p_org
+       and (p.payment_date = p_date
+            or (p.voided and (p.voided_at at time zone 'America/Lima')::date = p_date))
+  ),
+  cust as (
+    select c.id, c.full_name, c.email
+      from public.customers c
+     where c.id in (select customer_id from pays)
+       and c.statement_email
+       and nullif(trim(c.email), '') is not null
+       and not exists (select 1 from public.statement_sends ss
+                        where ss.org_id = p_org and ss.kind = 'CLIENTE' and ss.statement_date = p_date
+                          and ss.customer_id = c.id and ss.status = 'ENVIADO')
+  )
+  select jsonb_build_object(
+    'date', p_date,
+    'company', (select jsonb_build_object('name', coalesce(st.company_name, o.name), 'tax_id', st.tax_id,
+                                          'address', st.address, 'phone', st.phone, 'mobile', st.mobile,
+                                          'email', st.email, 'logo', st.logo,
+                                          -- Responder a: correo de la empresa o, si no tiene, el del primer ADMIN activo
+                                          'reply_to', coalesce(nullif(trim(st.email), ''),
+                                            (select pr.email from public.profiles pr
+                                              where pr.org_id = p_org and pr.role = 'ADMIN' and pr.active
+                                              order by pr.created_at limit 1)))
+                  from public.organizations o left join public.settings st on st.org_id = o.id
+                 where o.id = p_org),
+    'customers', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'customer_id', c.id, 'name', c.full_name, 'email', trim(c.email),
+               'movements', (select jsonb_agg(jsonb_build_object(
+                                      'receipt_number', p.receipt_number, 'order_number', p.order_number,
+                                      'order_title', p.order_title, 'payment_date', p.payment_date,
+                                      'method', p.method, 'amount', p.amount, 'currency', p.currency,
+                                      'is_advance', p.is_advance, 'voided', p.voided, 'void_reason', p.void_reason)
+                                    order by p.created_at)
+                               from pays p where p.customer_id = c.id),
+               'orders', (select jsonb_agg(jsonb_build_object(
+                                   'number', o.number, 'title', o.title, 'status', o.status, 'currency', o.currency,
+                                   'total', o.total, 'amount_paid', o.amount_paid, 'balance', o.balance)
+                                 order by o.created_at)
+                            from public.orders o
+                           where o.customer_id = c.id and o.status <> 'CANCELADO'
+                             and (o.balance > 0 or o.id in (select order_id from pays)))))
+        from cust c), '[]'::jsonb),
+    'closing', case
+      when exists (select 1 from public.statement_sends
+                    where org_id = p_org and kind = 'CIERRE' and statement_date = p_date and status = 'ENVIADO')
+        then null
+      else jsonb_build_object(
+        'recipients', (select coalesce(jsonb_agg(distinct pr.email), '[]'::jsonb) from public.profiles pr
+                        where pr.org_id = p_org and pr.active and pr.role in ('ADMIN', 'GERENTE')
+                          and nullif(trim(pr.email), '') is not null),
+        'by_method', (select coalesce(jsonb_agg(jsonb_build_object('method', method, 'currency', currency,
+                                                                   'count', n, 'amount', amt)
+                                                order by currency, method), '[]'::jsonb)
+                        from (select method, currency, count(*) n, sum(amount) amt from public.payments
+                               where org_id = p_org and payment_date = p_date and not voided
+                               group by method, currency) x),
+        'advances', (select coalesce(jsonb_agg(jsonb_build_object('currency', currency, 'count', n, 'amount', amt)),
+                                     '[]'::jsonb)
+                       from (select currency, count(*) n, sum(amount) amt from public.payments
+                              where org_id = p_org and payment_date = p_date and not voided and is_advance
+                              group by currency) x),
+        'payments', (select coalesce(jsonb_agg(jsonb_build_object(
+                                       'receipt_number', p.receipt_number, 'order_number', p.order_number,
+                                       'customer', c.full_name, 'method', p.method, 'amount', p.amount,
+                                       'currency', p.currency, 'is_advance', p.is_advance)
+                                     order by p.created_at), '[]'::jsonb)
+                       from pays p join public.customers c on c.id = p.customer_id
+                      where not p.voided and p.payment_date = p_date),
+        'voided', (select coalesce(jsonb_agg(jsonb_build_object(
+                                     'receipt_number', p.receipt_number, 'order_number', p.order_number,
+                                     'amount', p.amount, 'currency', p.currency, 'reason', p.void_reason)),
+                                   '[]'::jsonb)
+                     from pays p where p.voided),
+        'jeweler_payments', (select coalesce(jsonb_agg(jsonb_build_object(
+                                               'number', jp.number, 'jeweler', j.full_name, 'order_number', o.number,
+                                               'amount', jp.amount, 'currency', jp.currency, 'method', jp.method)
+                                             order by jp.created_at), '[]'::jsonb)
+                               from public.jeweler_payments jp
+                               join public.jewelers j on j.id = jp.jeweler_id
+                               join public.orders o on o.id = jp.order_id
+                              where jp.org_id = p_org and jp.payment_date = p_date and not jp.voided))
+    end);
+$$;
+
+revoke execute on function public.check_statements_secret(text) from public, anon, authenticated;
+revoke execute on function public.statement_orgs_due(uuid) from public, anon, authenticated;
+revoke execute on function public.daily_statement_data(uuid, date) from public, anon, authenticated;
+grant execute on function public.check_statements_secret(text) to service_role;
+grant execute on function public.statement_orgs_due(uuid) to service_role;
+grant execute on function public.daily_statement_data(uuid, date) to service_role;
+
+-- ---------------------------------------------------------------------
+-- Tarea programada: cada hora en punto. La función decide qué empresas
+-- toca procesar según su hora configurada.
+-- ---------------------------------------------------------------------
+select cron.unschedule(jobid) from cron.job where jobname = 'estados-de-cuenta';
+select cron.schedule('estados-de-cuenta', '0 * * * *', $cron$
+  select net.http_post(
+    url     := 'https://ynxnxdgzsykhobfujyio.supabase.co/functions/v1/daily-statements',
+    headers := jsonb_build_object(
+                 'Content-Type', 'application/json',
+                 'x-cron-secret', (select decrypted_secret from vault.decrypted_secrets
+                                    where name = 'statements_cron_secret')),
+    body    := '{}'::jsonb,
+    timeout_milliseconds := 60000);
+$cron$);
+
+-- >>> 0016_seguridad_funciones_internas.sql
+-- =====================================================================
+-- 0016_seguridad_funciones_internas.sql
+-- Hallazgos de la revisión de seguridad del 2026-10-20 (prueba de ataque
+-- desde otra empresa):
+--   1. Funciones internas SECURITY DEFINER que cualquier usuario con sesión
+--      podía llamar por /rest/v1/rpc sin validar la empresa: inyectar eventos
+--      en el historial de otro pedido, adelantar la numeración de otra empresa,
+--      leer correos de admins de otras empresas, contar sus usuarios, etc.
+--      Solo las usan triggers y otras funciones SECURITY DEFINER (que corren
+--      con los permisos del dueño), nunca políticas RLS ni la app: se les
+--      quita EXECUTE a los usuarios.
+--   2. Solicitud de acceso (anónima): límite contra spam.
+--   3. Storage: sin SVG (puede llevar scripts incrustados).
+--   4. Logo de la empresa: formato y tamaño validados también en la base.
+-- =====================================================================
+
+-- 1. Funciones internas fuera de la API
+do $$
+declare
+  r record;
+begin
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in (
+         'log_order_event', 'next_document_number', 'recalc_order_totals', 'recalc_quotation_totals',
+         'sync_order_production', 'subscription_reminders_due', 'org_seats_used', 'org_seat_limit',
+         'org_branch_limit', 'org_branches_used', 'main_branch_id', 'default_branch_id', 'org_access_state',
+         'assert_order_editable', 'current_user_name', 'is_admin_or_system', 'current_app_role',
+         'assert_platform_admin', 'has_branch_access')
+  loop
+    execute format('grant execute on function %s to service_role', r.sig);
+    execute format('revoke execute on function %s from public, anon, authenticated', r.sig);
+  end loop;
+end;
+$$;
+
+-- 2. Solicitud de acceso: una por correo cada 24 horas y como máximo 30 por hora en total
+create or replace function public.access_requests_throttle()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if exists (select 1 from public.access_requests
+              where lower(email) = lower(new.email) and created_at > now() - interval '24 hours') then
+    raise exception 'Ya recibimos una solicitud con este correo. Le responderemos pronto.';
+  end if;
+  if (select count(*) from public.access_requests where created_at > now() - interval '1 hour') >= 30 then
+    raise exception 'Estamos recibiendo muchas solicitudes. Intente nuevamente en unos minutos.';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists access_requests_throttle on public.access_requests;
+create trigger access_requests_throttle before insert on public.access_requests
+  for each row execute function public.access_requests_throttle();
+revoke execute on function public.access_requests_throttle() from public, anon, authenticated;
+
+-- 3. Storage: sin SVG
+update storage.buckets
+   set allowed_mime_types = array_remove(allowed_mime_types, 'image/svg+xml')
+ where id = 'orders';
+
+-- 4. Logo: data URL PNG/JPEG de hasta ~750 KB (la app lo reduce a 600 px de ancho)
+alter table public.settings
+  add constraint settings_logo_check
+  check (logo is null or (logo ~ '^data:image/(png|jpeg);base64,' and length(logo) <= 1000000));
+
+-- >>> 0017_estados_de_cuenta_brevo.sql
+-- =====================================================================
+-- 0017_estados_de_cuenta_brevo.sql
+--   * Envío por Brevo: la API key y el remitente verificado se guardan en
+--     Vault (brevo_api_key, mail_sender_email) y solo los lee la Edge
+--     Function con service_role.
+--   * El estado de cuenta incluye todo lo ocurrido desde el último estado
+--     de cuenta enviado a ese cliente (o desde el inicio del día si nunca
+--     recibió uno): ningún movimiento se pierde aunque ocurra después de la
+--     hora de envío o si un día falló el correo.
+--   * El cierre de caja sigue siendo por día (uno por fecha).
+-- La API key NO va en este archivo: se carga en Vault con
+--   select vault.create_secret('<api key>', 'brevo_api_key', '...');
+-- =====================================================================
+
+select vault.create_secret('jjcastilloo79@gmail.com', 'mail_sender_email',
+                           'Remitente verificado en Brevo para correos transaccionales')
+ where not exists (select 1 from vault.secrets where name = 'mail_sender_email');
+
+-- Configuración de envío para la Edge Function (solo service_role)
+create or replace function public.statement_mail_config()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object(
+    'brevo_api_key', (select decrypted_secret from vault.decrypted_secrets where name = 'brevo_api_key'),
+    'sender_email',  (select decrypted_secret from vault.decrypted_secrets where name = 'mail_sender_email'));
+$$;
+revoke execute on function public.statement_mail_config() from public, anon, authenticated;
+grant execute on function public.statement_mail_config() to service_role;
+
+-- Varios estados de cuenta por cliente y fecha son válidos (p. ej. si cambia la hora de envío);
+-- el control de duplicados lo da "desde el último enviado". El cierre de caja sigue siendo uno por día.
+drop index if exists public.statement_sends_once_uidx;
+create unique index statement_sends_closing_once_uidx on public.statement_sends (org_id, statement_date)
+  where status = 'ENVIADO' and kind = 'CIERRE';
+
+create or replace function public.daily_statement_data(p_org uuid, p_date date)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  with last_sent as (
+    select customer_id, max(created_at) as sent_at
+      from public.statement_sends
+     where org_id = p_org and kind = 'CLIENTE' and status = 'ENVIADO' and customer_id is not null
+     group by customer_id
+  ),
+  -- Movimientos de cada cliente desde su último estado de cuenta (o desde el inicio de p_date en Lima)
+  moves as (
+    select p.*, o.number as order_number, o.title as order_title, o.customer_id
+      from public.payments p
+      join public.orders o on o.id = p.order_id
+      left join last_sent ls on ls.customer_id = o.customer_id
+     where p.org_id = p_org
+       and (p.created_at > coalesce(ls.sent_at, p_date::timestamp at time zone 'America/Lima')
+            or (p.voided and p.voided_at > coalesce(ls.sent_at, p_date::timestamp at time zone 'America/Lima')))
+  ),
+  -- Cierre de caja: movimientos del día p_date
+  pays as (
+    select p.*, o.number as order_number, o.title as order_title, o.customer_id
+      from public.payments p
+      join public.orders o on o.id = p.order_id
+     where p.org_id = p_org
+       and (p.payment_date = p_date
+            or (p.voided and (p.voided_at at time zone 'America/Lima')::date = p_date))
+  ),
+  cust as (
+    select c.id, c.full_name, c.email
+      from public.customers c
+     where c.id in (select customer_id from moves)
+       and c.statement_email
+       and nullif(trim(c.email), '') is not null
+  )
+  select jsonb_build_object(
+    'date', p_date,
+    'company', (select jsonb_build_object('name', coalesce(st.company_name, o.name), 'tax_id', st.tax_id,
+                                          'address', st.address, 'phone', st.phone, 'mobile', st.mobile,
+                                          'email', st.email, 'logo', st.logo,
+                                          'reply_to', coalesce(nullif(trim(st.email), ''),
+                                            (select pr.email from public.profiles pr
+                                              where pr.org_id = p_org and pr.role = 'ADMIN' and pr.active
+                                              order by pr.created_at limit 1)))
+                  from public.organizations o left join public.settings st on st.org_id = o.id
+                 where o.id = p_org),
+    'customers', coalesce((
+      select jsonb_agg(jsonb_build_object(
+               'customer_id', c.id, 'name', c.full_name, 'email', trim(c.email),
+               'movements', (select jsonb_agg(jsonb_build_object(
+                                      'receipt_number', m.receipt_number, 'order_number', m.order_number,
+                                      'order_title', m.order_title, 'payment_date', m.payment_date,
+                                      'method', m.method, 'amount', m.amount, 'currency', m.currency,
+                                      'is_advance', m.is_advance, 'voided', m.voided, 'void_reason', m.void_reason)
+                                    order by m.created_at)
+                               from moves m where m.customer_id = c.id),
+               'orders', (select jsonb_agg(jsonb_build_object(
+                                   'number', o.number, 'title', o.title, 'status', o.status, 'currency', o.currency,
+                                   'total', o.total, 'amount_paid', o.amount_paid, 'balance', o.balance)
+                                 order by o.created_at)
+                            from public.orders o
+                           where o.customer_id = c.id and o.status <> 'CANCELADO'
+                             and (o.balance > 0 or o.id in (select order_id from moves)))))
+        from cust c), '[]'::jsonb),
+    'closing', case
+      when exists (select 1 from public.statement_sends
+                    where org_id = p_org and kind = 'CIERRE' and statement_date = p_date and status = 'ENVIADO')
+        then null
+      else jsonb_build_object(
+        'recipients', (select coalesce(jsonb_agg(distinct pr.email), '[]'::jsonb) from public.profiles pr
+                        where pr.org_id = p_org and pr.active and pr.role in ('ADMIN', 'GERENTE')
+                          and nullif(trim(pr.email), '') is not null),
+        'by_method', (select coalesce(jsonb_agg(jsonb_build_object('method', method, 'currency', currency,
+                                                                   'count', n, 'amount', amt)
+                                                order by currency, method), '[]'::jsonb)
+                        from (select method, currency, count(*) n, sum(amount) amt from public.payments
+                               where org_id = p_org and payment_date = p_date and not voided
+                               group by method, currency) x),
+        'advances', (select coalesce(jsonb_agg(jsonb_build_object('currency', currency, 'count', n, 'amount', amt)),
+                                     '[]'::jsonb)
+                       from (select currency, count(*) n, sum(amount) amt from public.payments
+                              where org_id = p_org and payment_date = p_date and not voided and is_advance
+                              group by currency) x),
+        'payments', (select coalesce(jsonb_agg(jsonb_build_object(
+                                       'receipt_number', p.receipt_number, 'order_number', p.order_number,
+                                       'customer', c.full_name, 'method', p.method, 'amount', p.amount,
+                                       'currency', p.currency, 'is_advance', p.is_advance)
+                                     order by p.created_at), '[]'::jsonb)
+                       from pays p join public.customers c on c.id = p.customer_id
+                      where not p.voided and p.payment_date = p_date),
+        'voided', (select coalesce(jsonb_agg(jsonb_build_object(
+                                     'receipt_number', p.receipt_number, 'order_number', p.order_number,
+                                     'amount', p.amount, 'currency', p.currency, 'reason', p.void_reason)),
+                                   '[]'::jsonb)
+                     from pays p where p.voided),
+        'jeweler_payments', (select coalesce(jsonb_agg(jsonb_build_object(
+                                               'number', jp.number, 'jeweler', j.full_name, 'order_number', o.number,
+                                               'amount', jp.amount, 'currency', jp.currency, 'method', jp.method)
+                                             order by jp.created_at), '[]'::jsonb)
+                               from public.jeweler_payments jp
+                               join public.jewelers j on j.id = jp.jeweler_id
+                               join public.orders o on o.id = jp.order_id
+                              where jp.org_id = p_org and jp.payment_date = p_date and not jp.voided))
+    end);
+$$;
+revoke execute on function public.daily_statement_data(uuid, date) from public, anon, authenticated;
+grant execute on function public.daily_statement_data(uuid, date) to service_role;
+
+-- >>> 0018_tipo_cambio_precio_oro.sql
+-- =====================================================================
+-- 0018_tipo_cambio_precio_oro.sql
+--   * Tipo de cambio por día (USD/PEN), compra y venta:
+--       - Automático (org_id null): TC paralelo de Kambista, con el oficial
+--         de SUNAT como referencia (y respaldo si Kambista no responde).
+--       - Manual (org_id de la empresa): corrige el automático de ese día
+--         solo para esa empresa.
+--     Rige el registro de la fecha más reciente <= al día consultado; en la
+--     misma fecha, el manual gana al automático.
+--   * Precio internacional del oro (US$/onza troy) y su equivalente en S/
+--     por gramo de oro 24K, al TC de venta del día.
+--   * pg_cron consulta las fuentes varias veces al día (hora de Lima) con la
+--     extensión http (síncrona); ADMIN/GERENTE pueden forzar la consulta.
+-- =====================================================================
+
+create extension if not exists http with schema extensions;
+
+-- ---------------------------------------------------------------------
+-- Tablas
+-- ---------------------------------------------------------------------
+create table public.exchange_rates (
+  id          uuid primary key default gen_random_uuid(),
+  org_id      uuid references public.organizations (id) on delete cascade,   -- null = automático
+  rate_date   date not null,
+  buy         numeric(8, 4) not null check (buy > 0),
+  sell        numeric(8, 4) not null check (sell > 0),
+  source      text not null check (source in ('KAMBISTA', 'SUNAT', 'MANUAL')),
+  sunat_buy   numeric(8, 4) check (sunat_buy is null or sunat_buy > 0),
+  sunat_sell  numeric(8, 4) check (sunat_sell is null or sunat_sell > 0),
+  created_by  uuid references public.profiles (id),
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now(),
+  constraint exchange_rates_manual check ((org_id is null) = (source <> 'MANUAL'))
+);
+create unique index exchange_rates_auto_uidx on public.exchange_rates (rate_date) where org_id is null;
+create unique index exchange_rates_org_uidx on public.exchange_rates (org_id, rate_date) where org_id is not null;
+create trigger exchange_rates_updated_at before update on public.exchange_rates
+  for each row execute function public.set_updated_at();
+
+create table public.gold_prices (
+  price_date  date primary key,
+  usd_oz      numeric(12, 2) not null check (usd_oz > 0),       -- US$ por onza troy
+  pen_g_24k   numeric(10, 2) check (pen_g_24k is null or pen_g_24k > 0),   -- S/ por gramo 24K
+  source      text not null default 'GOLD-API',
+  fetched_at  timestamptz not null default now()
+);
+
+alter table public.exchange_rates enable row level security;
+alter table public.gold_prices    enable row level security;
+
+-- Escritura solo vía funciones.
+create policy exchange_rates_select on public.exchange_rates for select to authenticated
+  using (org_id is null or org_id = public.current_org_id());
+create policy gold_prices_select on public.gold_prices for select to authenticated
+  using (true);
+
+-- ---------------------------------------------------------------------
+-- Consulta de fuentes externas (pg_cron y botón "Actualizar ahora")
+-- ---------------------------------------------------------------------
+create or replace function public.refresh_market_rates()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_date       date := (now() at time zone 'America/Lima')::date;
+  v_res        extensions.http_response;
+  v_body       jsonb;
+  v_buy        numeric;
+  v_sell       numeric;
+  v_sunat_buy  numeric;
+  v_sunat_sell numeric;
+  v_usd_oz     numeric;
+  v_rate_sell  numeric;
+  v_errors     text[] := '{}';
+begin
+  perform extensions.http_set_curlopt('CURLOPT_TIMEOUT', '15');
+
+  -- TC paralelo (Kambista)
+  begin
+    v_res := extensions.http_get('https://api.kambista.com/v1/exchange/calculates?originCurrency=USD&destinationCurrency=PEN&amount=1&active=S');
+    if v_res.status = 200 then
+      v_body := v_res.content::jsonb;
+      v_buy  := nullif(v_body #>> '{tc,bid}', '')::numeric;
+      v_sell := nullif(v_body #>> '{tc,ask}', '')::numeric;
+    else
+      v_errors := v_errors || ('Kambista HTTP ' || v_res.status);
+    end if;
+  exception when others then
+    v_errors := v_errors || ('Kambista: ' || sqlerrm);
+  end;
+
+  -- TC oficial (SUNAT)
+  begin
+    v_res := extensions.http_get('https://api.apis.net.pe/v1/tipo-cambio-sunat');
+    if v_res.status = 200 then
+      v_body := v_res.content::jsonb;
+      v_sunat_buy  := nullif(v_body ->> 'compra', '')::numeric;
+      v_sunat_sell := nullif(v_body ->> 'venta', '')::numeric;
+    else
+      v_errors := v_errors || ('SUNAT HTTP ' || v_res.status);
+    end if;
+  exception when others then
+    v_errors := v_errors || ('SUNAT: ' || sqlerrm);
+  end;
+
+  if coalesce(v_buy, 0) > 0 and coalesce(v_sell, 0) > 0 then
+    insert into public.exchange_rates (rate_date, buy, sell, source, sunat_buy, sunat_sell)
+    values (v_date, v_buy, v_sell, 'KAMBISTA', v_sunat_buy, v_sunat_sell)
+    on conflict (rate_date) where org_id is null
+    do update set buy = excluded.buy, sell = excluded.sell, source = excluded.source,
+                  sunat_buy = coalesce(excluded.sunat_buy, exchange_rates.sunat_buy),
+                  sunat_sell = coalesce(excluded.sunat_sell, exchange_rates.sunat_sell);
+  elsif coalesce(v_sunat_buy, 0) > 0 and coalesce(v_sunat_sell, 0) > 0 then
+    -- Sin paralelo: se registra el oficial, sin pisar un paralelo ya obtenido hoy.
+    insert into public.exchange_rates (rate_date, buy, sell, source, sunat_buy, sunat_sell)
+    values (v_date, v_sunat_buy, v_sunat_sell, 'SUNAT', v_sunat_buy, v_sunat_sell)
+    on conflict (rate_date) where org_id is null
+    do update set sunat_buy = excluded.sunat_buy, sunat_sell = excluded.sunat_sell,
+                  buy  = case when exchange_rates.source = 'SUNAT' then excluded.buy else exchange_rates.buy end,
+                  sell = case when exchange_rates.source = 'SUNAT' then excluded.sell else exchange_rates.sell end;
+  end if;
+
+  -- Oro internacional (gold-api.com, US$ por onza troy)
+  begin
+    v_res := extensions.http_get('https://api.gold-api.com/price/XAU');
+    if v_res.status = 200 then
+      v_usd_oz := nullif(v_res.content::jsonb ->> 'price', '')::numeric;
+    else
+      v_errors := v_errors || ('Oro HTTP ' || v_res.status);
+    end if;
+  exception when others then
+    v_errors := v_errors || ('Oro: ' || sqlerrm);
+  end;
+
+  if coalesce(v_usd_oz, 0) > 0 then
+    select sell into v_rate_sell from public.exchange_rates
+     where org_id is null and rate_date <= v_date order by rate_date desc limit 1;
+    insert into public.gold_prices (price_date, usd_oz, pen_g_24k, fetched_at)
+    values (v_date, round(v_usd_oz, 2), round(v_usd_oz / 31.1034768 * v_rate_sell, 2), now())
+    on conflict (price_date)
+    do update set usd_oz = excluded.usd_oz, pen_g_24k = excluded.pen_g_24k, fetched_at = now();
+  end if;
+
+  return jsonb_build_object('date', v_date, 'buy', v_buy, 'sell', v_sell,
+                            'sunat_buy', v_sunat_buy, 'sunat_sell', v_sunat_sell,
+                            'gold_usd_oz', v_usd_oz, 'errors', to_jsonb(v_errors));
+end;
+$$;
+
+-- Botón "Actualizar ahora" (ADMIN o GERENTE de una empresa, o superadministrador)
+create or replace function public.refresh_market_rates_now()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not (public.has_role('ADMIN', 'GERENTE') or public.is_platform_admin()) then
+    raise exception 'Solo un administrador o gerente puede actualizar el tipo de cambio.';
+  end if;
+  return public.refresh_market_rates();
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Tipo de cambio manual de la empresa
+-- ---------------------------------------------------------------------
+create or replace function public.save_exchange_rate(p_date date, p_buy numeric, p_sell numeric)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar el tipo de cambio.';
+  end if;
+  if p_date is null or p_date > (now() at time zone 'America/Lima')::date then
+    raise exception 'Indique una fecha que no sea futura.';
+  end if;
+  if coalesce(p_buy, 0) <= 0 or coalesce(p_sell, 0) <= 0 then
+    raise exception 'La compra y la venta deben ser mayores que cero.';
+  end if;
+  if p_buy > p_sell then
+    raise exception 'La compra no puede ser mayor que la venta.';
+  end if;
+
+  insert into public.exchange_rates (org_id, rate_date, buy, sell, source, created_by)
+  values (v_org, p_date, p_buy, p_sell, 'MANUAL', auth.uid())
+  on conflict (org_id, rate_date) where org_id is not null
+  do update set buy = excluded.buy, sell = excluded.sell, created_by = excluded.created_by;
+end;
+$$;
+
+-- Quita la corrección manual de un día: vuelve a regir el automático.
+create or replace function public.delete_exchange_rate(p_date date)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede modificar el tipo de cambio.';
+  end if;
+  delete from public.exchange_rates where org_id = v_org and rate_date = p_date;
+end;
+$$;
+
+-- TC vigente para la empresa en una fecha (para convertir montos en reportes)
+create or replace function public.exchange_rate_on(p_date date default null)
+returns table (rate_date date, buy numeric, sell numeric, source text)
+language sql
+stable
+set search_path = public
+as $$
+  select e.rate_date, e.buy, e.sell, e.source
+    from public.exchange_rates e
+   where (e.org_id is null or e.org_id = public.current_org_id())
+     and e.rate_date <= coalesce(p_date, (now() at time zone 'America/Lima')::date)
+   order by e.rate_date desc, (e.org_id is null)
+   limit 1;
+$$;
+
+-- Indicadores del día para el dashboard: TC, oro internacional y precio del oro de la empresa
+create or replace function public.market_today()
+returns jsonb
+language sql
+stable
+set search_path = public
+as $$
+  with today as (select (now() at time zone 'America/Lima')::date as d)
+  select jsonb_build_object(
+    'date', (select d from today),
+    'exchange', (select to_jsonb(x) from public.exchange_rate_on(null) x),
+    'sunat', (select jsonb_build_object('rate_date', e.rate_date, 'buy', e.sunat_buy, 'sell', e.sunat_sell)
+                from public.exchange_rates e
+               where e.org_id is null and e.sunat_sell is not null
+               order by e.rate_date desc limit 1),
+    'gold', (select jsonb_build_object('price_date', g.price_date, 'usd_oz', g.usd_oz, 'pen_g_24k', g.pen_g_24k,
+                                       'fetched_at', g.fetched_at)
+               from public.gold_prices g order by g.price_date desc limit 1),
+    'company_gold', (select coalesce(jsonb_agg(jsonb_build_object(
+                                      'name', c.name, 'purity', c.purity, 'unit', c.unit,
+                                      'price', c.price, 'price_date', c.price_date)
+                                    order by c.name), '[]'::jsonb)
+                       from public.material_prices_current() c
+                      where c.type = 'ORO' and c.price is not null));
+$$;
+
+-- ---------------------------------------------------------------------
+-- Permisos
+-- ---------------------------------------------------------------------
+revoke execute on function public.refresh_market_rates() from public, anon, authenticated;
+grant execute on function public.refresh_market_rates() to service_role;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.refresh_market_rates_now()',
+    'public.save_exchange_rate(date, numeric, numeric)',
+    'public.delete_exchange_rate(date)',
+    'public.exchange_rate_on(date)',
+    'public.market_today()'
+  ] loop
+    execute format('revoke execute on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated, service_role', f);
+  end loop;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Tarea programada: 8:05, 11:05, 14:05 y 17:05 (Lima = UTC-5)
+-- ---------------------------------------------------------------------
+select cron.unschedule(jobid) from cron.job where jobname = 'tipo-cambio-oro';
+select cron.schedule('tipo-cambio-oro', '5 13,16,19,22 * * *', $cron$ select public.refresh_market_rates(); $cron$);
+
+-- Primer registro al aplicar la migración
+select public.refresh_market_rates();
+
+-- >>> 0019_gastos_prestamos.sql
+-- =====================================================================
+-- 0019_gastos_prestamos.sql
+--   * Gastos de la empresa (planilla, servicios, alquiler, impuestos...).
+--     No se eliminan: se anulan (como los recibos de egreso).
+--   * Préstamos al personal y a joyeros, con sus abonos (en efectivo o
+--     descontados del pago al joyero / de la planilla).
+--   * Estado de resultados mensual por caja: cobros recibidos del mes
+--     menos pagos a joyeros y gastos. Los montos en US$ se pasan a soles
+--     con el TC de venta vigente en la fecha de cada movimiento (0018).
+--     Los préstamos no son gasto ni ingreso: se informan aparte.
+-- =====================================================================
+
+-- Numeración: GA (gasto), PR (préstamo), AP (abono de préstamo)
+alter table public.document_sequences drop constraint document_sequences_doc_type_check;
+alter table public.document_sequences
+  add constraint document_sequences_doc_type_check
+  check (doc_type in ('COT', 'PED', 'ENT', 'PRO', 'OP', 'RI', 'RE', 'GA', 'PR', 'AP'));
+
+-- ---------------------------------------------------------------------
+-- Conversión a soles con el TC de la empresa en una fecha
+-- ---------------------------------------------------------------------
+create or replace function public.to_pen(p_amount numeric, p_currency text, p_date date)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select case when p_currency = 'USD'
+              then round(p_amount * coalesce((select sell from public.exchange_rate_on(p_date)),
+                                             (select sell from public.exchange_rate_on(null))), 2)
+              else p_amount end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Gastos
+-- ---------------------------------------------------------------------
+create table public.expenses (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references public.organizations (id) on delete cascade,
+  branch_id     uuid not null references public.branches (id),
+  number        text not null,
+  expense_date  date not null default current_date,
+  category      text not null check (category in ('PLANILLA', 'SERVICIOS', 'ALQUILER', 'IMPUESTOS', 'COMPRA_MATERIAL',
+                                                  'HONORARIOS', 'MARKETING', 'MANTENIMIENTO', 'TRANSPORTE',
+                                                  'BANCARIOS', 'OTROS')),
+  description   text not null check (length(trim(description)) > 0),
+  supplier      text,                                   -- proveedor o persona a quien se paga
+  document_ref  text,                                   -- factura, boleta, recibo
+  amount        numeric(12, 2) not null check (amount > 0),
+  currency      text not null default 'PEN' check (currency in ('PEN', 'USD')),
+  method        text not null check (method in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'OTRO')),
+  notes         text,
+  voided        boolean not null default false,
+  voided_at     timestamptz,
+  voided_by     uuid references public.profiles (id),
+  void_reason   text,
+  created_by    uuid references public.profiles (id),
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now(),
+  unique (org_id, number)
+);
+create index expenses_org_date_idx on public.expenses (org_id, expense_date);
+create trigger expenses_updated_at before update on public.expenses
+  for each row execute function public.set_updated_at();
+create trigger aa_subscription_guard before insert or update or delete on public.expenses
+  for each row execute function public.enforce_org_writable();
+
+-- Registra o corrige un gasto. p_data: {expense_date, category, description, supplier, document_ref,
+-- amount, currency, method, notes, branch_id}
+create or replace function public.save_expense(p_id uuid, p_data jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_id      uuid := coalesce(p_id, gen_random_uuid());
+  v_number  text;
+  v_branch  uuid := coalesce(nullif(p_data ->> 'branch_id', '')::uuid, public.default_branch_id(v_org));
+  v_date    date := coalesce(nullif(p_data ->> 'expense_date', '')::date, current_date);
+  e         public.expenses%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar gastos.';
+  end if;
+  if not public.has_branch_access(v_branch) then
+    raise exception 'Sucursal no válida.';
+  end if;
+  if v_date > current_date then
+    raise exception 'La fecha del gasto no puede ser futura.';
+  end if;
+  if coalesce(nullif(p_data ->> 'amount', '')::numeric, 0) <= 0 then
+    raise exception 'El monto debe ser mayor que cero.';
+  end if;
+  if length(trim(coalesce(p_data ->> 'description', ''))) = 0 then
+    raise exception 'Indique la descripción del gasto.';
+  end if;
+
+  if p_id is null then
+    v_number := public.next_document_number(v_org, 'GA');
+    insert into public.expenses (id, org_id, branch_id, number, expense_date, category, description, supplier,
+                                 document_ref, amount, currency, method, notes, created_by)
+    values (v_id, v_org, v_branch, v_number, v_date, p_data ->> 'category', trim(p_data ->> 'description'),
+            nullif(trim(p_data ->> 'supplier'), ''), nullif(trim(p_data ->> 'document_ref'), ''),
+            (p_data ->> 'amount')::numeric, coalesce(nullif(p_data ->> 'currency', ''), 'PEN'), p_data ->> 'method',
+            nullif(trim(p_data ->> 'notes'), ''), auth.uid());
+  else
+    select * into e from public.expenses where id = p_id and org_id = v_org for update;
+    if not found then
+      raise exception 'Gasto no encontrado.';
+    end if;
+    if e.voided then
+      raise exception 'El gasto está anulado y no puede modificarse.';
+    end if;
+    v_number := e.number;
+    update public.expenses
+       set branch_id = v_branch, expense_date = v_date, category = p_data ->> 'category',
+           description = trim(p_data ->> 'description'), supplier = nullif(trim(p_data ->> 'supplier'), ''),
+           document_ref = nullif(trim(p_data ->> 'document_ref'), ''), amount = (p_data ->> 'amount')::numeric,
+           currency = coalesce(nullif(p_data ->> 'currency', ''), 'PEN'), method = p_data ->> 'method',
+           notes = nullif(trim(p_data ->> 'notes'), '')
+     where id = p_id;
+  end if;
+  return jsonb_build_object('id', v_id, 'number', v_number);
+end;
+$$;
+
+create or replace function public.void_expense(p_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede anular gastos.';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Indique el motivo de la anulación.';
+  end if;
+  update public.expenses
+     set voided = true, voided_at = now(), voided_by = auth.uid(), void_reason = trim(p_reason)
+   where id = p_id and org_id = v_org and not voided;
+  if not found then
+    raise exception 'Gasto no encontrado o ya anulado.';
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Préstamos
+-- ---------------------------------------------------------------------
+create table public.loans (
+  id                uuid primary key default gen_random_uuid(),
+  org_id            uuid not null references public.organizations (id) on delete cascade,
+  branch_id         uuid not null references public.branches (id),
+  number            text not null,
+  beneficiary_type  text not null check (beneficiary_type in ('EMPLEADO', 'JOYERO')),
+  jeweler_id        uuid references public.jewelers (id),
+  profile_id        uuid references public.profiles (id),
+  beneficiary_name  text not null check (length(trim(beneficiary_name)) > 0),
+  document_number   text,
+  loan_date         date not null default current_date,
+  amount            numeric(12, 2) not null check (amount > 0),
+  currency          text not null default 'PEN' check (currency in ('PEN', 'USD')),
+  installments      integer not null default 1 check (installments between 1 and 60),
+  method            text not null check (method in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE', 'OTRO')),
+  reason            text not null check (length(trim(reason)) > 0),
+  amount_paid       numeric(12, 2) not null default 0,
+  balance           numeric(12, 2) generated always as (amount - amount_paid) stored,
+  voided            boolean not null default false,
+  voided_at         timestamptz,
+  voided_by         uuid references public.profiles (id),
+  void_reason       text,
+  created_by        uuid references public.profiles (id),
+  created_at        timestamptz not null default now(),
+  unique (org_id, number),
+  constraint loans_jeweler check ((beneficiary_type = 'JOYERO') = (jeweler_id is not null))
+);
+create index loans_org_idx on public.loans (org_id, loan_date);
+create index loans_jeweler_idx on public.loans (jeweler_id) where jeweler_id is not null;
+create trigger aa_subscription_guard before insert or update or delete on public.loans
+  for each row execute function public.enforce_org_writable();
+
+create table public.loan_payments (
+  id            uuid primary key default gen_random_uuid(),
+  org_id        uuid not null references public.organizations (id) on delete cascade,
+  loan_id       uuid not null references public.loans (id),
+  number        text not null,
+  payment_date  date not null default current_date,
+  amount        numeric(12, 2) not null check (amount > 0),
+  method        text not null check (method in ('EFECTIVO', 'YAPE', 'PLIN', 'TRANSFERENCIA', 'TARJETA', 'CHEQUE',
+                                                'DESCUENTO_PLANILLA', 'DESCUENTO_PAGO_JOYERO', 'OTRO')),
+  reference     text,
+  voided        boolean not null default false,
+  voided_at     timestamptz,
+  voided_by     uuid references public.profiles (id),
+  void_reason   text,
+  created_by    uuid references public.profiles (id),
+  created_at    timestamptz not null default now(),
+  unique (org_id, number)
+);
+create index loan_payments_loan_idx on public.loan_payments (loan_id);
+create index loan_payments_org_date_idx on public.loan_payments (org_id, payment_date);
+create trigger aa_subscription_guard before insert or update or delete on public.loan_payments
+  for each row execute function public.enforce_org_writable();
+
+create or replace function public.recalc_loan(p_loan_id uuid)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  update public.loans
+     set amount_paid = coalesce((select sum(amount) from public.loan_payments
+                                  where loan_id = p_loan_id and not voided), 0)
+   where id = p_loan_id;
+$$;
+
+-- p_data: {beneficiary_type, jeweler_id, profile_id, beneficiary_name, document_number, loan_date, amount,
+-- currency, installments, method, reason, branch_id}
+create or replace function public.register_loan(p_data jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_id      uuid := gen_random_uuid();
+  v_number  text;
+  v_type    text := p_data ->> 'beneficiary_type';
+  v_jeweler uuid := nullif(p_data ->> 'jeweler_id', '')::uuid;
+  v_profile uuid := nullif(p_data ->> 'profile_id', '')::uuid;
+  v_name    text := nullif(trim(p_data ->> 'beneficiary_name'), '');
+  v_doc     text := nullif(trim(p_data ->> 'document_number'), '');
+  v_branch  uuid := coalesce(nullif(p_data ->> 'branch_id', '')::uuid, public.default_branch_id(v_org));
+  v_date    date := coalesce(nullif(p_data ->> 'loan_date', '')::date, current_date);
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar préstamos.';
+  end if;
+  if not public.has_branch_access(v_branch) then
+    raise exception 'Sucursal no válida.';
+  end if;
+  if v_type = 'JOYERO' then
+    select full_name, coalesce(v_doc, document_number) into v_name, v_doc
+      from public.jewelers where id = v_jeweler and org_id = v_org;
+    if v_name is null then
+      raise exception 'Seleccione un joyero válido.';
+    end if;
+    v_profile := null;
+  elsif v_type = 'EMPLEADO' then
+    v_jeweler := null;
+    if v_profile is not null then
+      select coalesce(v_name, full_name) into v_name from public.profiles where id = v_profile and org_id = v_org;
+      if not found then
+        raise exception 'Usuario no válido.';
+      end if;
+    end if;
+    if v_name is null then
+      raise exception 'Indique el nombre del trabajador.';
+    end if;
+  else
+    raise exception 'Tipo de beneficiario no válido.';
+  end if;
+  if coalesce(nullif(p_data ->> 'amount', '')::numeric, 0) <= 0 then
+    raise exception 'El monto debe ser mayor que cero.';
+  end if;
+  if length(trim(coalesce(p_data ->> 'reason', ''))) = 0 then
+    raise exception 'Indique el motivo del préstamo.';
+  end if;
+  if v_date > current_date then
+    raise exception 'La fecha del préstamo no puede ser futura.';
+  end if;
+
+  v_number := public.next_document_number(v_org, 'PR');
+  insert into public.loans (id, org_id, branch_id, number, beneficiary_type, jeweler_id, profile_id, beneficiary_name,
+                            document_number, loan_date, amount, currency, installments, method, reason, created_by)
+  values (v_id, v_org, v_branch, v_number, v_type, v_jeweler, v_profile, v_name, v_doc, v_date,
+          (p_data ->> 'amount')::numeric, coalesce(nullif(p_data ->> 'currency', ''), 'PEN'),
+          coalesce(nullif(p_data ->> 'installments', '')::integer, 1), p_data ->> 'method', trim(p_data ->> 'reason'),
+          auth.uid());
+  return jsonb_build_object('id', v_id, 'number', v_number);
+end;
+$$;
+
+create or replace function public.register_loan_payment(p_loan_id uuid, p_amount numeric, p_method text,
+                                                        p_payment_date date default null, p_reference text default null)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_id      uuid := gen_random_uuid();
+  v_number  text;
+  l         public.loans%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede registrar abonos.';
+  end if;
+  select * into l from public.loans where id = p_loan_id and org_id = v_org for update;
+  if not found then
+    raise exception 'Préstamo no encontrado.';
+  end if;
+  if l.voided then
+    raise exception 'El préstamo está anulado.';
+  end if;
+  if coalesce(p_amount, 0) <= 0 then
+    raise exception 'El monto debe ser mayor que cero.';
+  end if;
+  if p_amount > l.balance then
+    raise exception 'El abono (%) supera el saldo del préstamo (%).',
+      public.format_money(p_amount, l.currency), public.format_money(l.balance, l.currency);
+  end if;
+  if coalesce(p_payment_date, current_date) > current_date then
+    raise exception 'La fecha del abono no puede ser futura.';
+  end if;
+
+  v_number := public.next_document_number(v_org, 'AP');
+  insert into public.loan_payments (id, org_id, loan_id, number, payment_date, amount, method, reference, created_by)
+  values (v_id, v_org, p_loan_id, v_number, coalesce(p_payment_date, current_date), p_amount, p_method,
+          nullif(trim(p_reference), ''), auth.uid());
+  perform public.recalc_loan(p_loan_id);
+  return jsonb_build_object('id', v_id, 'number', v_number);
+end;
+$$;
+
+create or replace function public.void_loan_payment(p_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org  uuid := public.current_org_id();
+  v_loan uuid;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede anular abonos.';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Indique el motivo de la anulación.';
+  end if;
+  update public.loan_payments
+     set voided = true, voided_at = now(), voided_by = auth.uid(), void_reason = trim(p_reason)
+   where id = p_id and org_id = v_org and not voided
+  returning loan_id into v_loan;
+  if v_loan is null then
+    raise exception 'Abono no encontrado o ya anulado.';
+  end if;
+  perform public.recalc_loan(v_loan);
+end;
+$$;
+
+-- Un préstamo solo se anula si no tiene abonos vigentes.
+create or replace function public.void_loan(p_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede anular préstamos.';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Indique el motivo de la anulación.';
+  end if;
+  if exists (select 1 from public.loan_payments where loan_id = p_id and not voided) then
+    raise exception 'Anule primero los abonos del préstamo.';
+  end if;
+  update public.loans
+     set voided = true, voided_at = now(), voided_by = auth.uid(), void_reason = trim(p_reason)
+   where id = p_id and org_id = v_org and not voided;
+  if not found then
+    raise exception 'Préstamo no encontrado o ya anulado.';
+  end if;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Estado de resultados (por caja) de un mes
+-- ---------------------------------------------------------------------
+create or replace function public.report_profit(p_year integer, p_month integer, p_branch_id uuid default null)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_org    uuid := public.current_org_id();
+  v_from   date := make_date(p_year, p_month, 1);
+  v_to     date := (make_date(p_year, p_month, 1) + interval '1 month - 1 day')::date;
+  v_result jsonb;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede ver la utilidad.';
+  end if;
+  if p_branch_id is not null and not public.has_branch_access(p_branch_id) then
+    raise exception 'Sucursal no válida.';
+  end if;
+
+  with
+  income as (
+    select p.method, p.currency, p.amount, public.to_pen(p.amount, p.currency, p.payment_date) as pen
+      from public.payments p join public.orders o on o.id = p.order_id
+     where p.org_id = v_org and not p.voided and p.payment_date between v_from and v_to
+       and (p_branch_id is null or o.branch_id = p_branch_id)),
+  labor as (
+    select jp.currency, jp.amount, public.to_pen(jp.amount, jp.currency, jp.payment_date) as pen
+      from public.jeweler_payments jp
+     where jp.org_id = v_org and not jp.voided and jp.payment_date between v_from and v_to
+       and (p_branch_id is null or jp.branch_id = p_branch_id)),
+  spend as (
+    select e.category, e.currency, e.amount, public.to_pen(e.amount, e.currency, e.expense_date) as pen
+      from public.expenses e
+     where e.org_id = v_org and not e.voided and e.expense_date between v_from and v_to
+       and (p_branch_id is null or e.branch_id = p_branch_id)),
+  lent as (
+    select public.to_pen(l.amount, l.currency, l.loan_date) as pen
+      from public.loans l
+     where l.org_id = v_org and not l.voided and l.loan_date between v_from and v_to
+       and (p_branch_id is null or l.branch_id = p_branch_id)),
+  repaid as (
+    select public.to_pen(lp.amount, l.currency, lp.payment_date) as pen
+      from public.loan_payments lp join public.loans l on l.id = lp.loan_id
+     where lp.org_id = v_org and not lp.voided and lp.payment_date between v_from and v_to
+       and (p_branch_id is null or l.branch_id = p_branch_id)),
+  totals as (
+    select (select coalesce(sum(pen), 0) from income) as income,
+           (select coalesce(sum(pen), 0) from labor)  as labor,
+           (select coalesce(sum(pen), 0) from spend)  as expenses)
+  select jsonb_build_object(
+    'from', v_from, 'to', v_to,
+    'income', t.income,
+    'income_usd', (select coalesce(sum(amount), 0) from income where currency = 'USD'),
+    'income_by_method', (select coalesce(jsonb_agg(jsonb_build_object('method', method, 'amount', amt) order by amt desc), '[]'::jsonb)
+                           from (select method, sum(pen) amt from income group by method) x),
+    'labor', t.labor,
+    'gross_profit', t.income - t.labor,
+    'expenses', t.expenses,
+    'expenses_by_category', (select coalesce(jsonb_agg(jsonb_build_object('category', category, 'amount', amt, 'count', n)
+                                                       order by amt desc), '[]'::jsonb)
+                               from (select category, sum(pen) amt, count(*) n from spend group by category) x),
+    'net_profit', t.income - t.labor - t.expenses,
+    'margin', case when t.income > 0 then round((t.income - t.labor - t.expenses) / t.income * 100, 1) end,
+    'loans_given', (select coalesce(sum(pen), 0) from lent),
+    'loans_repaid', (select coalesce(sum(pen), 0) from repaid),
+    'exchange_rate', (select sell from public.exchange_rate_on(v_to)))
+    into v_result
+    from totals t;
+  return v_result;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- RLS (escritura solo vía funciones)
+-- ---------------------------------------------------------------------
+alter table public.expenses      enable row level security;
+alter table public.loans         enable row level security;
+alter table public.loan_payments enable row level security;
+
+create policy expenses_select on public.expenses for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+         and branch_id in (select public.current_branch_ids()));
+create policy loans_select on public.loans for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+         and branch_id in (select public.current_branch_ids()));
+create policy loan_payments_select on public.loan_payments for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE'));
+
+-- ---------------------------------------------------------------------
+-- Permisos
+-- ---------------------------------------------------------------------
+revoke execute on function public.recalc_loan(uuid) from public, anon, authenticated;
+grant execute on function public.recalc_loan(uuid) to service_role;
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.to_pen(numeric, text, date)',
+    'public.save_expense(uuid, jsonb)',
+    'public.void_expense(uuid, text)',
+    'public.register_loan(jsonb)',
+    'public.register_loan_payment(uuid, numeric, text, date, text)',
+    'public.void_loan_payment(uuid, text)',
+    'public.void_loan(uuid, text)',
+    'public.report_profit(integer, integer, uuid)'
+  ] loop
+    execute format('revoke execute on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated, service_role', f);
+  end loop;
+end;
+$$;
+
+-- >>> 0020_vitrina_joyas_piedras.sql
+-- =====================================================================
+-- 0020_vitrina_joyas_piedras.sql
+--   * Joyas terminadas en stock (vitrina): una fila por pieza.
+--   * Piedras registradas una a una (diamantes y gemas de valor) con las
+--     4C de GIA: quilates, color (D–Z), claridad (FL–I3) y talla
+--     (Excelente–Pobre), más pulido, simetría, fluorescencia, medidas y
+--     certificado. Las piedras pequeñas sin certificado (melee) siguen en
+--     materiales por quilates.
+--   * product_gems: piedras que lleva cada joya (una piedra registrada o
+--     un grupo descrito: "12 brillantes 0.24 ct total").
+--   * Venta: un pedido de tipo VENTA cuyo ítem apunta a la joya o a la
+--     piedra (order_items.product_id / gem_id). Al guardar el pedido la
+--     pieza queda RESERVADA; al entregarlo, VENDIDA; si se cancela, vuelve
+--     a stock.
+--   * Fotos en el bucket privado "products" (carpeta = empresa).
+-- =====================================================================
+
+-- Numeración: JY (joya) y PD (piedra), correlativo sin año (year = 0)
+alter table public.document_sequences drop constraint document_sequences_doc_type_check;
+alter table public.document_sequences
+  add constraint document_sequences_doc_type_check
+  check (doc_type in ('COT', 'PED', 'ENT', 'PRO', 'OP', 'RI', 'RE', 'GA', 'PR', 'AP', 'JY', 'PD'));
+
+-- ---------------------------------------------------------------------
+-- Joyas
+-- ---------------------------------------------------------------------
+create table public.products (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null default public.current_org_id() references public.organizations (id) on delete cascade,
+  branch_id    uuid not null references public.branches (id),
+  code         text not null,
+  name         text not null check (length(trim(name)) > 0),
+  category     text not null check (category in ('ANILLO', 'ARO_COMPROMISO', 'ARETES', 'COLLAR', 'CADENA', 'DIJE',
+                                                 'PULSERA', 'BRAZALETE', 'GEMELOS', 'PRENDEDOR', 'RELOJ', 'OTRO')),
+  material_id  uuid references public.materials (id),
+  metal        text,                                  -- "Oro 18K", "Plata 925"
+  metal_color  text check (metal_color in ('AMARILLO', 'BLANCO', 'ROSADO', 'BICOLOR', 'TRICOLOR')),
+  weight_g     numeric(10, 2) check (weight_g is null or weight_g > 0),
+  size         text,                                  -- talla del anillo, largo de la cadena
+  description  text,
+  cost         numeric(12, 2) not null default 0 check (cost >= 0),
+  price        numeric(12, 2) not null check (price >= 0),
+  currency     text not null default 'PEN' check (currency in ('PEN', 'USD')),
+  photo_path   text,
+  status       text not null default 'STOCK' check (status in ('STOCK', 'RESERVADO', 'VENDIDO', 'BAJA')),
+  order_id     uuid references public.orders (id),    -- pedido que la reserva o la vendió
+  sold_at      timestamptz,
+  notes        text,
+  created_by   uuid default auth.uid() references public.profiles (id),
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now(),
+  unique (org_id, code)
+);
+create index products_org_status_idx on public.products (org_id, status, category);
+create trigger products_updated_at before update on public.products
+  for each row execute function public.set_updated_at();
+create trigger aa_subscription_guard before insert or update or delete on public.products
+  for each row execute function public.enforce_org_writable();
+
+-- ---------------------------------------------------------------------
+-- Piedras (una fila por piedra)
+-- ---------------------------------------------------------------------
+create table public.gems (
+  id                  uuid primary key default gen_random_uuid(),
+  org_id              uuid not null default public.current_org_id() references public.organizations (id) on delete cascade,
+  branch_id           uuid not null references public.branches (id),
+  code                text not null,
+  gem_type            text not null default 'DIAMANTE'
+                      check (gem_type in ('DIAMANTE', 'ESMERALDA', 'RUBI', 'ZAFIRO', 'TANZANITA', 'AMATISTA', 'TOPACIO',
+                                          'AGUAMARINA', 'PERLA', 'OTRA')),
+  shape               text not null check (shape in ('REDONDO', 'PRINCESA', 'OVALO', 'PERA', 'ESMERALDA', 'CORAZON',
+                                                     'MARQUISE', 'COJIN', 'RADIANT', 'ASSCHER', 'BAGUETTE', 'TRILLION', 'OTRA')),
+  carat               numeric(8, 3) not null check (carat > 0),
+  color               text,              -- D…Z en diamantes; descripción libre en gemas de color
+  clarity             text check (clarity in ('FL', 'IF', 'VVS1', 'VVS2', 'VS1', 'VS2', 'SI1', 'SI2', 'I1', 'I2', 'I3')),
+  cut_grade           text check (cut_grade in ('EXCELENTE', 'MUY_BUENA', 'BUENA', 'REGULAR', 'POBRE')),
+  polish              text check (polish in ('EXCELENTE', 'MUY_BUENA', 'BUENA', 'REGULAR', 'POBRE')),
+  symmetry            text check (symmetry in ('EXCELENTE', 'MUY_BUENA', 'BUENA', 'REGULAR', 'POBRE')),
+  fluorescence        text check (fluorescence in ('NINGUNA', 'DEBIL', 'MEDIA', 'FUERTE', 'MUY_FUERTE')),
+  length_mm           numeric(6, 2) check (length_mm is null or length_mm > 0),
+  width_mm            numeric(6, 2) check (width_mm is null or width_mm > 0),
+  depth_mm            numeric(6, 2) check (depth_mm is null or depth_mm > 0),
+  lab                 text check (lab in ('GIA', 'IGI', 'HRD', 'AGS', 'GCAL', 'OTRO')),
+  certificate_number  text,
+  origin              text not null default 'EMPRESA' check (origin in ('EMPRESA', 'CLIENTE')),
+  customer_id         uuid references public.customers (id),     -- dueño si es del cliente
+  cost                numeric(12, 2) not null default 0 check (cost >= 0),
+  price               numeric(12, 2) not null default 0 check (price >= 0),
+  currency            text not null default 'USD' check (currency in ('PEN', 'USD')),
+  photo_path          text,
+  status              text not null default 'STOCK'
+                      check (status in ('STOCK', 'RESERVADA', 'MONTADA', 'VENDIDA', 'DEVUELTA', 'BAJA')),
+  product_id          uuid references public.products (id),      -- joya en la que está montada
+  order_id            uuid references public.orders (id),
+  sold_at             timestamptz,
+  notes               text,
+  created_by          uuid default auth.uid() references public.profiles (id),
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now(),
+  unique (org_id, code),
+  constraint gems_diamond_color check (gem_type <> 'DIAMANTE' or color is null or color ~ '^[D-Z]$'),
+  constraint gems_customer check ((origin = 'CLIENTE') = (customer_id is not null))
+);
+create index gems_org_status_idx on public.gems (org_id, status, gem_type);
+create unique index gems_certificate_uidx on public.gems (org_id, lab, certificate_number) where certificate_number is not null;
+create trigger gems_updated_at before update on public.gems
+  for each row execute function public.set_updated_at();
+create trigger aa_subscription_guard before insert or update or delete on public.gems
+  for each row execute function public.enforce_org_writable();
+
+-- Piedras de cada joya
+create table public.product_gems (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null default public.current_org_id() references public.organizations (id) on delete cascade,
+  product_id   uuid not null references public.products (id) on delete cascade,
+  gem_id       uuid references public.gems (id),
+  role         text not null default 'CENTRAL' check (role in ('CENTRAL', 'LATERAL', 'PAVE', 'OTRA')),
+  description  text,                           -- para grupos sin registro individual
+  quantity     integer not null default 1 check (quantity > 0),
+  total_carat  numeric(8, 3) check (total_carat is null or total_carat > 0),
+  constraint product_gems_what check (gem_id is not null or length(trim(coalesce(description, ''))) > 0)
+);
+create index product_gems_product_idx on public.product_gems (product_id);
+create unique index product_gems_gem_uidx on public.product_gems (gem_id) where gem_id is not null;
+create trigger aa_subscription_guard before insert or update or delete on public.product_gems
+  for each row execute function public.enforce_org_writable();
+
+-- Código automático (JY-000001 / PD-000001) si no se indica uno
+create or replace function public.inventory_before_insert()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_prefix text := case tg_table_name when 'products' then 'JY' else 'PD' end;
+  v_next   integer;
+begin
+  new.branch_id := coalesce(new.branch_id, public.default_branch_id(new.org_id));
+  if nullif(trim(new.code), '') is null then
+    insert into public.document_sequences as s (org_id, doc_type, year, last_value)
+    values (new.org_id, v_prefix, 0, 1)
+    on conflict (org_id, doc_type, year) do update set last_value = s.last_value + 1
+    returning last_value into v_next;
+    new.code := v_prefix || '-' || lpad(v_next::text, 6, '0');
+  else
+    new.code := upper(trim(new.code));
+  end if;
+  return new;
+end;
+$$;
+create trigger products_before_insert before insert on public.products
+  for each row execute function public.inventory_before_insert();
+create trigger gems_before_insert before insert on public.gems
+  for each row execute function public.inventory_before_insert();
+
+-- Montar / desmontar una piedra registrada en una joya
+create or replace function public.product_gems_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') and old.gem_id is not null then
+    update public.gems set status = 'STOCK', product_id = null
+     where id = old.gem_id and product_id = old.product_id and status = 'MONTADA';
+  end if;
+  if tg_op in ('INSERT', 'UPDATE') and new.gem_id is not null then
+    if not exists (select 1 from public.gems
+                    where id = new.gem_id and org_id = new.org_id
+                      and (status = 'STOCK' or (status = 'MONTADA' and product_id = new.product_id))) then
+      raise exception 'La piedra no está disponible en stock.';
+    end if;
+    update public.gems set status = 'MONTADA', product_id = new.product_id where id = new.gem_id;
+  end if;
+  return null;
+end;
+$$;
+create trigger product_gems_sync after insert or update or delete on public.product_gems
+  for each row execute function public.product_gems_sync();
+
+-- ---------------------------------------------------------------------
+-- Venta desde pedidos
+-- ---------------------------------------------------------------------
+alter table public.order_items
+  add column product_id uuid references public.products (id),
+  add column gem_id     uuid references public.gems (id),
+  add constraint order_items_one_piece check (product_id is null or gem_id is null),
+  add constraint order_items_piece_qty check ((product_id is null and gem_id is null) or quantity = 1);
+create index order_items_product_idx on public.order_items (product_id) where product_id is not null;
+create index order_items_gem_idx on public.order_items (gem_id) where gem_id is not null;
+
+create or replace function public.order_items_inventory_sync()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if tg_op in ('UPDATE', 'DELETE') then
+    if old.product_id is not null then
+      update public.products set status = 'STOCK', order_id = null
+       where id = old.product_id and order_id = old.order_id and status = 'RESERVADO';
+    end if;
+    if old.gem_id is not null then
+      update public.gems set status = 'STOCK', order_id = null
+       where id = old.gem_id and order_id = old.order_id and status = 'RESERVADA';
+    end if;
+  end if;
+
+  if tg_op in ('INSERT', 'UPDATE') then
+    if new.product_id is not null then
+      update public.products set status = 'RESERVADO', order_id = new.order_id
+       where id = new.product_id and org_id = new.org_id
+         and (status = 'STOCK' or (status = 'RESERVADO' and order_id = new.order_id));
+      if not found then
+        raise exception 'La joya % ya no está disponible en vitrina.',
+          coalesce((select code from public.products where id = new.product_id), '');
+      end if;
+    end if;
+    if new.gem_id is not null then
+      update public.gems set status = 'RESERVADA', order_id = new.order_id
+       where id = new.gem_id and org_id = new.org_id
+         and (status = 'STOCK' or (status = 'RESERVADA' and order_id = new.order_id));
+      if not found then
+        raise exception 'La piedra % ya no está disponible.',
+          coalesce((select code from public.gems where id = new.gem_id), '');
+      end if;
+    end if;
+  end if;
+  return null;
+end;
+$$;
+create trigger order_items_inventory_sync after insert or update or delete on public.order_items
+  for each row execute function public.order_items_inventory_sync();
+
+-- Al entregar: vendida. Al cancelar: vuelve a stock. Al reabrir una entrega: reservada otra vez.
+create or replace function public.orders_inventory_status()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if new.status in ('ENTREGADO', 'CERRADO') and old.status not in ('ENTREGADO', 'CERRADO') then
+    update public.products set status = 'VENDIDO', sold_at = now() where order_id = new.id and status = 'RESERVADO';
+    update public.gems set status = 'VENDIDA', sold_at = now() where order_id = new.id and status = 'RESERVADA';
+    -- Las piedras montadas en la joya vendida se van con ella.
+    update public.gems g set status = 'VENDIDA', sold_at = now(), order_id = new.id
+      from public.products p
+     where p.order_id = new.id and g.product_id = p.id and g.status = 'MONTADA';
+  elsif new.status = 'CANCELADO' then
+    update public.products set status = 'STOCK', order_id = null, sold_at = null
+     where order_id = new.id and status in ('RESERVADO', 'VENDIDO');
+    update public.gems g set status = case when g.product_id is not null then 'MONTADA' else 'STOCK' end,
+                             order_id = null, sold_at = null
+     where g.order_id = new.id and g.status in ('RESERVADA', 'VENDIDA');
+  elsif old.status in ('ENTREGADO', 'CERRADO') and new.status not in ('ENTREGADO', 'CERRADO') then
+    update public.products set status = 'RESERVADO', sold_at = null where order_id = new.id and status = 'VENDIDO';
+    update public.gems g set status = case when g.product_id is not null then 'MONTADA' else 'RESERVADA' end, sold_at = null
+     where g.order_id = new.id and g.status = 'VENDIDA';
+  elsif old.status = 'CANCELADO' then
+    -- Reapertura: vuelve a reservar las piezas de sus ítems (falla si ya se vendieron en otro pedido).
+    update public.order_items set product_id = product_id where order_id = new.id and (product_id is not null or gem_id is not null);
+  end if;
+  return null;
+end;
+$$;
+create trigger orders_inventory_status after update of status on public.orders
+  for each row when (new.status is distinct from old.status)
+  execute function public.orders_inventory_status();
+
+-- save_order: ahora guarda la joya o piedra de cada ítem
+create or replace function public.save_order(p_id uuid, p_header jsonb, p_items jsonb)
+returns uuid
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_id uuid := p_id;
+  v_currency text := coalesce(nullif(p_header ->> 'currency', ''), 'PEN');
+begin
+  if jsonb_array_length(coalesce(p_items, '[]'::jsonb)) = 0 then
+    raise exception 'El pedido debe tener al menos un ítem.';
+  end if;
+  if v_currency not in ('PEN', 'USD') then
+    raise exception 'Moneda no válida.';
+  end if;
+
+  if v_id is null then
+    insert into public.orders (branch_id, customer_id, service_type_id, priority, title, description, main_material,
+                               estimated_weight, stone, size, notes, assigned_to, start_date, due_date, tax_rate, currency)
+    values (nullif(p_header ->> 'branch_id', '')::uuid,
+            (p_header ->> 'customer_id')::uuid, (p_header ->> 'service_type_id')::uuid,
+            coalesce(p_header ->> 'priority', 'MEDIA'), p_header ->> 'title', p_header ->> 'description',
+            p_header ->> 'main_material', (p_header ->> 'estimated_weight')::numeric, p_header ->> 'stone',
+            p_header ->> 'size', p_header ->> 'notes', nullif(p_header ->> 'assigned_to', '')::uuid,
+            coalesce((p_header ->> 'start_date')::date, current_date), (p_header ->> 'due_date')::date,
+            coalesce((p_header ->> 'tax_rate')::numeric, 18), v_currency)
+    returning id into v_id;
+  else
+    if exists (select 1 from public.orders where id = v_id and currency <> v_currency)
+       and exists (select 1 from public.payments where order_id = v_id and not voided) then
+      raise exception 'No se puede cambiar la moneda de un pedido con pagos registrados.';
+    end if;
+    update public.orders
+       set branch_id = coalesce(nullif(p_header ->> 'branch_id', '')::uuid, branch_id),
+           customer_id = (p_header ->> 'customer_id')::uuid,
+           service_type_id = (p_header ->> 'service_type_id')::uuid,
+           priority = coalesce(p_header ->> 'priority', priority),
+           title = p_header ->> 'title',
+           description = p_header ->> 'description',
+           main_material = p_header ->> 'main_material',
+           estimated_weight = (p_header ->> 'estimated_weight')::numeric,
+           stone = p_header ->> 'stone',
+           size = p_header ->> 'size',
+           notes = p_header ->> 'notes',
+           assigned_to = nullif(p_header ->> 'assigned_to', '')::uuid,
+           start_date = coalesce((p_header ->> 'start_date')::date, start_date),
+           due_date = (p_header ->> 'due_date')::date,
+           tax_rate = coalesce((p_header ->> 'tax_rate')::numeric, tax_rate),
+           currency = v_currency
+     where id = v_id;
+    if not found then
+      raise exception 'Pedido no encontrado o sin permisos.';
+    end if;
+    delete from public.order_items where order_id = v_id;
+  end if;
+
+  insert into public.order_items (order_id, position, description, detail, material_id, material_name,
+                                  quantity, unit, weight, unit_price, discount, product_id, gem_id)
+  select v_id, (i.ord - 1)::integer, i.item ->> 'description', i.item ->> 'detail',
+         nullif(i.item ->> 'material_id', '')::uuid, i.item ->> 'material_name',
+         (i.item ->> 'quantity')::numeric, coalesce(i.item ->> 'unit', 'und'),
+         nullif(i.item ->> 'weight', '')::numeric,
+         (i.item ->> 'unit_price')::numeric, coalesce((i.item ->> 'discount')::numeric, 0),
+         nullif(i.item ->> 'product_id', '')::uuid, nullif(i.item ->> 'gem_id', '')::uuid
+    from jsonb_array_elements(p_items) with ordinality as i(item, ord);
+
+  return v_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- RLS
+-- ---------------------------------------------------------------------
+alter table public.products     enable row level security;
+alter table public.gems         enable row level security;
+alter table public.product_gems enable row level security;
+
+-- Lectura: todo el personal comercial y de taller; el costo lo oculta la app a quien no es ADMIN/GERENTE.
+create policy products_select on public.products for select to authenticated
+  using (org_id = public.current_org_id() and branch_id in (select public.current_branch_ids()));
+create policy products_insert on public.products for insert to authenticated
+  with check (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+              and branch_id in (select public.current_branch_ids()));
+-- Estado y pedido los cambian solo los triggers (SECURITY DEFINER); BAJA sí puede marcarla el usuario.
+create policy products_update on public.products for update to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE'))
+  with check (org_id = public.current_org_id() and branch_id in (select public.current_branch_ids()));
+
+create policy gems_select on public.gems for select to authenticated
+  using (org_id = public.current_org_id() and branch_id in (select public.current_branch_ids()));
+create policy gems_insert on public.gems for insert to authenticated
+  with check (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+              and branch_id in (select public.current_branch_ids()));
+create policy gems_update on public.gems for update to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE'))
+  with check (org_id = public.current_org_id() and branch_id in (select public.current_branch_ids()));
+
+create policy product_gems_select on public.product_gems for select to authenticated
+  using (org_id = public.current_org_id());
+create policy product_gems_write on public.product_gems for all to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE'))
+  with check (org_id = public.current_org_id() and public.has_role('ADMIN', 'GERENTE')
+              and exists (select 1 from public.products p where p.id = product_id and p.org_id = public.current_org_id()));
+
+-- El usuario no cambia a mano status/order_id/sold_at salvo dar de baja o reactivar una pieza en stock.
+create or replace function public.inventory_protect_status()
+returns trigger
+language plpgsql
+as $$
+begin
+  if current_user in ('authenticated', 'anon')
+     and (new.status, new.order_id, new.sold_at) is distinct from (old.status, old.order_id, old.sold_at)
+     and not (new.order_id is not distinct from old.order_id and new.sold_at is not distinct from old.sold_at
+              and old.status in ('STOCK', 'BAJA') and new.status in ('STOCK', 'BAJA')) then
+    raise exception 'El estado de la pieza lo cambian los pedidos (reserva, venta o cancelación).';
+  end if;
+  return new;
+end;
+$$;
+create trigger products_protect_status before update on public.products
+  for each row execute function public.inventory_protect_status();
+create trigger gems_protect_status before update on public.gems
+  for each row execute function public.inventory_protect_status();
+
+-- ---------------------------------------------------------------------
+-- Fotos (bucket privado; la primera carpeta es el id de la empresa)
+-- ---------------------------------------------------------------------
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('products', 'products', false, 5242880, array['image/jpeg', 'image/png', 'image/webp'])
+on conflict (id) do nothing;
+
+create policy products_files_select on storage.objects for select to authenticated
+  using (bucket_id = 'products' and (storage.foldername(name))[1] = public.current_org_id()::text);
+create policy products_files_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'products' and (storage.foldername(name))[1] = public.current_org_id()::text
+              and public.has_role('ADMIN', 'GERENTE'));
+create policy products_files_delete on storage.objects for delete to authenticated
+  using (bucket_id = 'products' and (storage.foldername(name))[1] = public.current_org_id()::text
+         and public.has_role('ADMIN', 'GERENTE'));
+
+revoke execute on function public.inventory_before_insert() from public, anon, authenticated;
+revoke execute on function public.product_gems_sync() from public, anon, authenticated;
+revoke execute on function public.order_items_inventory_sync() from public, anon, authenticated;
+revoke execute on function public.orders_inventory_status() from public, anon, authenticated;
+revoke execute on function public.inventory_protect_status() from public, anon, authenticated;
+
+-- >>> 0021_actas_recepcion_reparaciones.sql
+-- =====================================================================
+-- 0021_actas_recepcion_reparaciones.sql
+--   * Origen del material del pedido: EMPRESA, CLIENTE o MIXTO.
+--   * Acta de recepción (AR): constancia de lo que el cliente deja en la
+--     empresa, con detalle (descripción, ley, cantidad, peso), estado en
+--     que se recibe y firma.
+--       - MATERIAL: materia prima del cliente para fabricar su joya. Cada
+--         línea con material y peso genera la ENTRADA de material del
+--         cliente del pedido (saldo en order_client_materials).
+--       - REPARACION: pieza del cliente para reparar, con el daño
+--         reportado, el peso de entrada y, al devolverla, el de salida.
+--   * register_repair(): crea en un paso el pedido de tipo Reparación y su
+--     acta.
+-- =====================================================================
+
+alter table public.document_sequences drop constraint document_sequences_doc_type_check;
+alter table public.document_sequences
+  add constraint document_sequences_doc_type_check
+  check (doc_type in ('COT', 'PED', 'ENT', 'PRO', 'OP', 'RI', 'RE', 'GA', 'PR', 'AP', 'JY', 'PD', 'AR'));
+
+alter table public.orders
+  add column material_source text not null default 'EMPRESA' check (material_source in ('EMPRESA', 'CLIENTE', 'MIXTO'));
+
+create table public.customer_receipts (
+  id                uuid primary key default gen_random_uuid(),
+  org_id            uuid not null references public.organizations (id) on delete cascade,
+  branch_id         uuid not null references public.branches (id),
+  number            text not null,
+  order_id          uuid not null references public.orders (id),
+  customer_id       uuid not null references public.customers (id),
+  kind              text not null check (kind in ('MATERIAL', 'REPARACION')),
+  received_at       timestamptz not null default now(),
+  delivered_by      text,               -- quien entrega, si no es el cliente
+  delivered_by_doc  text,
+  reported_issue    text,               -- daño o trabajo pedido (reparación)
+  condition_notes   text,               -- estado en que se recibe: rayones, piedras faltantes...
+  signature_path    text,
+  returned_at       timestamptz,        -- devolución de la pieza o del sobrante
+  returned_weight   numeric(10, 2) check (returned_weight is null or returned_weight > 0),
+  return_notes      text,
+  voided            boolean not null default false,
+  voided_at         timestamptz,
+  voided_by         uuid references public.profiles (id),
+  void_reason       text,
+  created_by        uuid references public.profiles (id),
+  created_at        timestamptz not null default now(),
+  unique (org_id, number)
+);
+create index customer_receipts_order_idx on public.customer_receipts (order_id);
+create index customer_receipts_org_idx on public.customer_receipts (org_id, kind, received_at desc);
+create trigger aa_subscription_guard before insert or update or delete on public.customer_receipts
+  for each row execute function public.enforce_org_writable();
+
+create table public.customer_receipt_items (
+  id           uuid primary key default gen_random_uuid(),
+  org_id       uuid not null references public.organizations (id) on delete cascade,
+  receipt_id   uuid not null references public.customer_receipts (id) on delete cascade,
+  position     integer not null default 0,
+  description  text not null check (length(trim(description)) > 0),
+  material_id  uuid references public.materials (id),
+  purity       text,
+  quantity     integer not null default 1 check (quantity > 0),
+  weight_g     numeric(10, 2) check (weight_g is null or weight_g > 0),
+  carats       numeric(8, 3) check (carats is null or carats > 0),
+  movement_id  uuid references public.material_movements (id)
+);
+create index customer_receipt_items_receipt_idx on public.customer_receipt_items (receipt_id, position);
+
+-- Peso total de la pieza al recibirla (suma de las líneas)
+create or replace function public.weight_in(public.customer_receipts)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select sum(weight_g) from public.customer_receipt_items where receipt_id = $1.id;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Registrar un acta. p_data: {received_at, delivered_by, delivered_by_doc, reported_issue, condition_notes}
+-- p_items: [{description, material_id, purity, quantity, weight_g, carats}]
+-- ---------------------------------------------------------------------
+create or replace function public.register_customer_receipt(p_order_id uuid, p_kind text, p_data jsonb, p_items jsonb)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_id      uuid := gen_random_uuid();
+  v_number  text;
+  o         public.orders%rowtype;
+  it        record;
+  v_unit    text;
+  v_qty     numeric;
+  v_mov     uuid;
+  v_metal   boolean := false;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR') then
+    raise exception 'No tiene permisos para registrar actas de recepción.';
+  end if;
+  if not public.can_view_order(p_order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+  perform public.assert_order_editable(p_order_id);
+  if p_kind not in ('MATERIAL', 'REPARACION') then
+    raise exception 'Tipo de acta no válido.';
+  end if;
+  if jsonb_typeof(p_items) <> 'array' or jsonb_array_length(p_items) = 0 then
+    raise exception 'Detalle al menos una pieza o material recibido.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_items) x where length(trim(coalesce(x ->> 'description', ''))) = 0) then
+    raise exception 'Cada línea debe tener una descripción.';
+  end if;
+  if exists (select 1 from jsonb_array_elements(p_items) x
+              where nullif(x ->> 'material_id', '') is not null
+                and not exists (select 1 from public.materials m where m.id = (x ->> 'material_id')::uuid and m.org_id = v_org)) then
+    raise exception 'Material no encontrado.';
+  end if;
+
+  select * into o from public.orders where id = p_order_id;
+  v_number := public.next_document_number(v_org, 'AR');
+  insert into public.customer_receipts (id, org_id, branch_id, number, order_id, customer_id, kind, received_at,
+                                        delivered_by, delivered_by_doc, reported_issue, condition_notes, created_by)
+  values (v_id, v_org, o.branch_id, v_number, p_order_id, o.customer_id, p_kind,
+          coalesce(nullif(p_data ->> 'received_at', '')::timestamptz, now()),
+          nullif(trim(p_data ->> 'delivered_by'), ''), nullif(trim(p_data ->> 'delivered_by_doc'), ''),
+          nullif(trim(p_data ->> 'reported_issue'), ''), nullif(trim(p_data ->> 'condition_notes'), ''), auth.uid());
+
+  for it in select x.item, x.ord from jsonb_array_elements(p_items) with ordinality as x(item, ord) loop
+    v_mov := null;
+    -- Materia prima del cliente: entra al saldo del cliente en el pedido (no al stock de la empresa)
+    if p_kind = 'MATERIAL' and nullif(it.item ->> 'material_id', '') is not null then
+      select unit into v_unit from public.materials where id = (it.item ->> 'material_id')::uuid;
+      v_qty := case v_unit when 'g' then nullif(it.item ->> 'weight_g', '')::numeric
+                           when 'ct' then nullif(it.item ->> 'carats', '')::numeric
+                           else nullif(it.item ->> 'quantity', '')::numeric end;
+      if coalesce(v_qty, 0) > 0 then
+        insert into public.material_movements (org_id, material_id, branch_id, order_id, movement_type, ownership,
+                                               quantity, notes, created_by)
+        values (v_org, (it.item ->> 'material_id')::uuid, o.branch_id, p_order_id, 'ENTRADA', 'CLIENTE', v_qty,
+                'Acta de recepción ' || v_number || ': ' || trim(it.item ->> 'description'), auth.uid())
+        returning id into v_mov;
+        v_metal := true;
+      end if;
+    end if;
+
+    insert into public.customer_receipt_items (org_id, receipt_id, position, description, material_id, purity,
+                                               quantity, weight_g, carats, movement_id)
+    values (v_org, v_id, (it.ord - 1)::integer, trim(it.item ->> 'description'),
+            nullif(it.item ->> 'material_id', '')::uuid, nullif(trim(it.item ->> 'purity'), ''),
+            coalesce(nullif(it.item ->> 'quantity', '')::integer, 1), nullif(it.item ->> 'weight_g', '')::numeric,
+            nullif(it.item ->> 'carats', '')::numeric, v_mov);
+  end loop;
+
+  if p_kind = 'MATERIAL' and o.material_source = 'EMPRESA' then
+    update public.orders set material_source = 'CLIENTE' where id = p_order_id;
+  end if;
+
+  perform public.log_order_event(p_order_id, 'MATERIAL',
+    public.current_user_name() || ' registró el acta de recepción ' || v_number ||
+    case when p_kind = 'REPARACION' then ' (pieza para reparación)' else ' (material del cliente)' end || '.',
+    null, v_number);
+  return jsonb_build_object('id', v_id, 'number', v_number, 'material_entries', v_metal);
+end;
+$$;
+
+-- Devolución de la pieza reparada o del sobrante del material: peso de salida y notas.
+create or replace function public.return_customer_receipt(p_id uuid, p_returned_weight numeric, p_notes text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+  r     public.customer_receipts%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR') then
+    raise exception 'No tiene permisos para registrar la devolución.';
+  end if;
+  select * into r from public.customer_receipts where id = p_id and org_id = v_org for update;
+  if not found or r.voided then
+    raise exception 'Acta no encontrada o anulada.';
+  end if;
+  if not public.can_view_order(r.order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+  update public.customer_receipts
+     set returned_at = now(), returned_weight = p_returned_weight, return_notes = nullif(trim(p_notes), '')
+   where id = p_id;
+  perform public.log_order_event(r.order_id, 'ENTREGA',
+    public.current_user_name() || ' registró la devolución de lo recibido en el acta ' || r.number ||
+    coalesce(' (peso de salida ' || trim(to_char(p_returned_weight, 'FM999G990D00')) || ' g)', '') || '.', null, r.number);
+end;
+$$;
+
+create or replace function public.void_customer_receipt(p_id uuid, p_reason text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+  r     public.customer_receipts%rowtype;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede anular actas.';
+  end if;
+  if length(trim(coalesce(p_reason, ''))) = 0 then
+    raise exception 'Indique el motivo de la anulación.';
+  end if;
+  select * into r from public.customer_receipts where id = p_id and org_id = v_org for update;
+  if not found or r.voided then
+    raise exception 'Acta no encontrada o ya anulada.';
+  end if;
+  if exists (select 1 from public.customer_receipt_items i where i.receipt_id = p_id and i.movement_id is not null) then
+    raise exception 'El acta generó entradas de material del cliente: regularícelas con una devolución en Materiales antes de anularla.';
+  end if;
+  update public.customer_receipts
+     set voided = true, voided_at = now(), voided_by = auth.uid(), void_reason = trim(p_reason)
+   where id = p_id;
+  perform public.log_order_event(r.order_id, 'MATERIAL',
+    public.current_user_name() || ' anuló el acta de recepción ' || r.number || '. Motivo: ' || trim(p_reason) || '.', null, r.number);
+end;
+$$;
+
+-- Firma del cliente en el acta (archivo en el bucket del pedido)
+create or replace function public.set_customer_receipt_signature(p_id uuid, p_path text)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_order uuid;
+begin
+  select order_id into v_order from public.customer_receipts where id = p_id and org_id = public.current_org_id();
+  if v_order is null or not public.can_view_order(v_order) or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR') then
+    raise exception 'Acta no encontrada o sin permisos.';
+  end if;
+  if p_path is null or split_part(p_path, '/', 1) <> v_order::text then
+    raise exception 'Archivo de firma no válido.';
+  end if;
+  update public.customer_receipts set signature_path = p_path where id = p_id;
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- Reparación en un paso: pedido de tipo Reparación + acta de recepción
+-- p_data: {customer_id, title, reported_issue, condition_notes, due_date, price, currency, branch_id,
+--          delivered_by, delivered_by_doc}
+-- p_items: líneas del acta (la pieza o piezas recibidas)
+-- ---------------------------------------------------------------------
+create or replace function public.register_repair(p_data jsonb, p_items jsonb)
+returns jsonb
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_service  uuid;
+  v_order    uuid;
+  v_receipt  jsonb;
+  v_title    text := coalesce(nullif(trim(p_data ->> 'title'), ''), 'Reparación');
+  v_issue    text := nullif(trim(p_data ->> 'reported_issue'), '');
+begin
+  if nullif(p_data ->> 'customer_id', '') is null then
+    raise exception 'Seleccione el cliente.';
+  end if;
+  if v_issue is null then
+    raise exception 'Describa el trabajo o daño a reparar.';
+  end if;
+  select id into v_service from public.service_types
+   where org_id = public.current_org_id() and code = 'REPARACION' and active
+   order by position limit 1;
+  if v_service is null then
+    raise exception 'No existe el tipo de servicio «Reparación» activo. Créelo en Configuración.';
+  end if;
+
+  v_order := public.save_order(null,
+    jsonb_build_object('customer_id', p_data ->> 'customer_id', 'service_type_id', v_service,
+                       'branch_id', p_data ->> 'branch_id', 'title', v_title, 'description', v_issue,
+                       'due_date', nullif(p_data ->> 'due_date', ''), 'currency', coalesce(nullif(p_data ->> 'currency', ''), 'PEN'),
+                       'priority', 'MEDIA', 'tax_rate', coalesce(nullif(p_data ->> 'tax_rate', ''), '0')),
+    jsonb_build_array(jsonb_build_object('description', 'Reparación: ' || v_title, 'detail', left(v_issue, 500),
+                                         'quantity', 1, 'unit', 'servicio',
+                                         'unit_price', coalesce(nullif(p_data ->> 'price', '')::numeric, 0))));
+
+  v_receipt := public.register_customer_receipt(v_order, 'REPARACION', p_data, p_items);
+  return jsonb_build_object('order_id', v_order,
+                            'order_number', (select number from public.orders where id = v_order),
+                            'receipt_id', v_receipt ->> 'id', 'receipt_number', v_receipt ->> 'number');
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- RLS (escritura solo vía funciones)
+-- ---------------------------------------------------------------------
+alter table public.customer_receipts      enable row level security;
+alter table public.customer_receipt_items enable row level security;
+
+create policy customer_receipts_select on public.customer_receipts for select to authenticated
+  using (org_id = public.current_org_id() and public.can_view_order(order_id));
+create policy customer_receipt_items_select on public.customer_receipt_items for select to authenticated
+  using (org_id = public.current_org_id()
+         and exists (select 1 from public.customer_receipts r where r.id = receipt_id and public.can_view_order(r.order_id)));
+
+do $$
+declare
+  f text;
+begin
+  foreach f in array array[
+    'public.weight_in(public.customer_receipts)',
+    'public.register_customer_receipt(uuid, text, jsonb, jsonb)',
+    'public.return_customer_receipt(uuid, numeric, text)',
+    'public.void_customer_receipt(uuid, text)',
+    'public.set_customer_receipt_signature(uuid, text)',
+    'public.register_repair(jsonb, jsonb)'
+  ] loop
+    execute format('revoke execute on function %s from public, anon', f);
+    execute format('grant execute on function %s to authenticated, service_role', f);
+  end loop;
+end;
+$$;
+
+-- >>> 0022_sin_saas.sql
+-- =====================================================================
+-- 0022_sin_saas.sql
+-- La app deja de ser SaaS multiempresa con suscripción mensual
+-- (decisión del 2026-11-03): es para una sola orfebrería (BRILLOS).
+--   * Se eliminan planes, suscripciones, pagos de suscripción, solicitudes
+--     de acceso y el superadministrador de plataforma.
+--   * Se quitan el modo solo lectura por plan vencido y los límites de
+--     usuarios y de sucursales por plan.
+--   * Se conservan organizations/org_id (RLS por empresa) y las invitaciones,
+--     que siguen siendo la única forma de dar de alta usuarios.
+--   * El antiguo superadministrador (jjcastilloo79@gmail.com) pasa a ser
+--     ADMIN de BRILLOS.
+-- =====================================================================
+
+-- ---------------------------------------------------------------------
+-- 1. Modo solo lectura y cupos: triggers en todas las tablas
+-- ---------------------------------------------------------------------
+do $$
+declare
+  r record;
+begin
+  for r in
+    select c.oid::regclass as tbl, t.tgname
+      from pg_trigger t join pg_class c on c.oid = t.tgrelid
+     where not t.tgisinternal
+       and t.tgname in ('aa_subscription_guard', 'organizations_create_subscription', 'profiles_seat_limit')
+  loop
+    execute format('drop trigger %I on %s', r.tgname, r.tbl);
+  end loop;
+end;
+$$;
+
+drop policy if exists orders_files_insert on storage.objects;
+create policy orders_files_insert on storage.objects for insert to authenticated
+  with check (bucket_id = 'orders' and public.can_access_order_file(name));
+
+-- ---------------------------------------------------------------------
+-- 2. RLS: la empresa ya no depende del estado de una suscripción
+-- ---------------------------------------------------------------------
+create or replace function public.current_org_id()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select p.org_id from public.profiles p where p.id = auth.uid() and p.active;
+$$;
+
+drop policy if exists invitations_select on public.invitations;
+create policy invitations_select on public.invitations for select to authenticated
+  using (org_id = public.current_org_id() and public.has_role('ADMIN'));
+
+-- ---------------------------------------------------------------------
+-- 3. Funciones de negocio sin controles de plan (mismo cuerpo que su
+--    última versión, sin el chequeo de vencimiento ni de cupos)
+-- ---------------------------------------------------------------------
+drop function if exists public.create_invitation(text, text, text);
+
+-- (última versión: 0011_branches.sql)
+create or replace function public.create_invitation(
+  p_email text, p_full_name text, p_role text, p_branch_ids uuid[] default null)
+returns uuid
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org    uuid := public.current_org_id();
+  v_email  text := lower(trim(p_email));
+  v_id     uuid;
+begin
+  if v_org is null or not public.has_role('ADMIN') then
+    raise exception 'Solo un administrador de la empresa puede invitar usuarios.';
+  end if;
+  if exists (select 1 from public.profiles where lower(email) = v_email) then
+    raise exception 'Ese correo ya tiene una cuenta en el sistema.';
+  end if;
+  if exists (select 1 from unnest(coalesce(p_branch_ids, array[]::uuid[])) x
+              where not exists (select 1 from public.branches b where b.id = x and b.org_id = v_org and b.active)) then
+    raise exception 'Una de las sucursales indicadas no existe o está inactiva.';
+  end if;
+  update public.invitations set status = 'REVOKED'
+   where org_id = v_org and lower(email) = v_email and status = 'PENDING';
+
+  insert into public.invitations (org_id, email, full_name, role, branch_ids)
+  values (v_org, v_email, nullif(trim(p_full_name), ''), p_role, nullif(p_branch_ids, array[]::uuid[]))
+  returning id into v_id;
+  return v_id;
+end;
+$$;
+
+-- (última versión: 0011_branches.sql)
+create or replace function public.set_branch_min_stock(p_material_id uuid, p_branch_id uuid, p_min_stock numeric)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org uuid := public.current_org_id();
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede configurar el stock mínimo.';
+  end if;
+  if coalesce(p_min_stock, -1) < 0 then
+    raise exception 'El stock mínimo no puede ser negativo.';
+  end if;
+  if not exists (select 1 from public.materials where id = p_material_id and org_id = v_org)
+     or not exists (select 1 from public.branches where id = p_branch_id and org_id = v_org) then
+    raise exception 'Material o sucursal no encontrados.';
+  end if;
+
+  insert into public.material_stock (org_id, material_id, branch_id, min_stock)
+  values (v_org, p_material_id, p_branch_id, p_min_stock)
+  on conflict (material_id, branch_id)
+  do update set min_stock = excluded.min_stock, updated_at = now();
+end;
+$$;
+
+-- (última versión: 0012_taller_joyeros_precios.sql)
+create or replace function public.issue_payment_receipt(p_payment_id uuid)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org      uuid := public.current_org_id();
+  v_order    uuid;
+  v_receipt  text;
+begin
+  if v_org is null or not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR') then
+    raise exception 'No tiene permisos para emitir recibos.';
+  end if;
+  select order_id, receipt_number into v_order, v_receipt
+    from public.payments where id = p_payment_id and org_id = v_org for update;
+  if v_order is null or not public.can_view_order(v_order) then
+    raise exception 'Pago no encontrado.';
+  end if;
+  if v_receipt is null then
+    v_receipt := public.next_document_number(v_org, 'RI');
+    update public.payments set receipt_number = v_receipt where id = p_payment_id;
+  end if;
+  return v_receipt;
+end;
+$$;
+
+-- (última versión: 0012_taller_joyeros_precios.sql)
+create or replace function public.issue_order_document(p_order_id uuid, p_doc_type text)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org     uuid := public.current_org_id();
+  v_number  text;
+  v_order   text;
+begin
+  if p_doc_type not in ('PRO', 'OP') then
+    raise exception 'Tipo de documento no válido.';
+  end if;
+  if v_org is null
+     or (p_doc_type = 'PRO' and not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR'))
+     or (p_doc_type = 'OP' and not public.has_role('ADMIN', 'GERENTE', 'VENDEDOR', 'SUPERVISOR')) then
+    raise exception 'No tiene permisos para emitir este documento.';
+  end if;
+  if not public.can_view_order(p_order_id) then
+    raise exception 'Pedido no encontrado o sin permisos.';
+  end if;
+
+  select number, case when p_doc_type = 'PRO' then proforma_number else production_number end
+    into v_order, v_number
+    from public.orders where id = p_order_id for update;
+
+  if v_number is null then
+    v_number := public.next_document_number(v_org, p_doc_type);
+    if p_doc_type = 'PRO' then
+      update public.orders set proforma_number = v_number, proforma_issued_at = now() where id = p_order_id;
+    else
+      update public.orders set production_number = v_number, production_issued_at = now() where id = p_order_id;
+    end if;
+    perform public.log_order_event(p_order_id, 'DOCUMENTO',
+      public.current_user_name() || ' emitió ' ||
+      case when p_doc_type = 'PRO' then 'la proforma ' else 'la orden de producción ' end ||
+      v_number || ' del pedido ' || v_order || '.', null, v_number);
+  end if;
+  return v_number;
+end;
+$$;
+
+-- (última versión: 0011_branches.sql)
+create or replace function public.branches_before_write()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_main_change boolean := coalesce(current_setting('app.branch_main_change', true), '') = 'on';
+begin
+  new.code := upper(trim(new.code));
+  new.name := trim(new.name);
+
+  if tg_op = 'INSERT' then
+    -- La primera sucursal de la empresa es la principal; las demás nunca nacen como principal.
+    new.is_main := not exists (select 1 from public.branches where org_id = new.org_id and is_main);
+  else
+    if new.org_id <> old.org_id then
+      raise exception 'Una sucursal no puede cambiar de empresa.';
+    end if;
+    if new.is_main is distinct from old.is_main and not v_main_change then
+      raise exception 'Para cambiar la sucursal principal use la opción «Marcar como principal».';
+    end if;
+  end if;
+
+  if new.is_main and not new.active then
+    raise exception 'La sucursal principal no se puede desactivar.';
+  end if;
+
+  if tg_op = 'UPDATE' and old.active and not new.active then
+    if exists (select 1 from public.material_stock where branch_id = new.id and stock > 0) then
+      raise exception 'La sucursal % todavía tiene stock de materiales. Trasládelo antes de desactivarla.', new.name;
+    end if;
+    if exists (select 1 from public.orders where branch_id = new.id
+                 and status not in ('ENTREGADO', 'CERRADO', 'CANCELADO')) then
+      raise exception 'La sucursal % tiene pedidos en curso. Termínelos o muévalos antes de desactivarla.', new.name;
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+-- (última versión: 0015_estados_de_cuenta.sql)
+create or replace function public.statement_orgs_due(p_org uuid default null)
+returns table (org_id uuid, statement_date date)
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select s.org_id, (now() at time zone 'America/Lima')::date
+    from public.settings s
+   where case when p_org is not null then s.org_id = p_org
+              else s.daily_statements_enabled
+                   and s.daily_statements_hour = extract(hour from now() at time zone 'America/Lima')::integer end;
+$$;
+
+-- (última versión: 0018_tipo_cambio_precio_oro.sql)
+create or replace function public.refresh_market_rates_now()
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.has_role('ADMIN', 'GERENTE') then
+    raise exception 'Solo un administrador o gerente puede actualizar el tipo de cambio.';
+  end if;
+  return public.refresh_market_rates();
+end;
+$$;
+
+-- (última versión: 0009_saas_platform.sql)
+create or replace function public.invitation_for_sending(p_id uuid)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select jsonb_build_object('id', i.id, 'email', i.email, 'full_name', i.full_name, 'org_id', i.org_id)
+    from public.invitations i
+   where i.id = p_id and i.status = 'PENDING'
+     and i.org_id = public.current_org_id() and public.has_role('ADMIN');
+$$;
+
+-- (última versión: 0009_saas_platform.sql)
+create or replace function public.revoke_invitation(p_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  update public.invitations set status = 'REVOKED'
+   where id = p_id and status = 'PENDING'
+     and org_id = public.current_org_id() and public.has_role('ADMIN');
+end;
+$$;
+
+-- Alta de usuarios: por invitación. Excepción: instalación vacía, donde el
+-- primer usuario crea la organización y queda como ADMIN.
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_inv     public.invitations%rowtype;
+  v_org_id  uuid;
+  v_name    text := coalesce(nullif(trim(new.raw_user_meta_data ->> 'full_name'), ''), split_part(new.email, '@', 1));
+begin
+  select * into v_inv from public.invitations
+   where lower(email) = lower(new.email) and status = 'PENDING'
+   order by created_at desc limit 1;
+
+  if found then
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_inv.org_id, coalesce(nullif(trim(v_inv.full_name), ''), v_name), new.email, v_inv.role, true);
+
+    insert into public.user_branches (org_id, user_id, branch_id)
+    select v_inv.org_id, new.id, b.id
+      from public.branches b
+     where b.org_id = v_inv.org_id
+       and (case when coalesce(cardinality(v_inv.branch_ids), 0) = 0 then b.is_main
+                 else b.id = any (v_inv.branch_ids) end);
+    if not found then
+      insert into public.user_branches (org_id, user_id, branch_id)
+      values (v_inv.org_id, new.id, public.main_branch_id(v_inv.org_id));
+    end if;
+
+    update public.invitations set status = 'ACCEPTED', accepted_at = now() where id = v_inv.id;
+    return new;
+  end if;
+
+  if not exists (select 1 from public.organizations) then
+    insert into public.organizations (name) values ('Mi Orfebrería') returning id into v_org_id;
+    insert into public.settings (org_id) values (v_org_id);
+    insert into public.profiles (id, org_id, full_name, email, role, active)
+    values (new.id, v_org_id, v_name, new.email, 'ADMIN', true);
+    insert into public.user_branches (org_id, user_id, branch_id)
+    values (v_org_id, new.id, public.main_branch_id(v_org_id));
+    return new;
+  end if;
+
+  raise exception 'El registro es solo por invitación. Pida a un administrador de la empresa que lo invite.';
+end;
+$$;
+
+revoke execute on function public.handle_new_user() from public, anon, authenticated;
+
+-- ---------------------------------------------------------------------
+-- 4. El antiguo superadministrador pasa a ser ADMIN de la empresa (BRILLOS)
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_user  uuid;
+  v_email text;
+  v_org   uuid;
+begin
+  select id, email into v_user, v_email from auth.users where lower(email) = 'jjcastilloo79@gmail.com';
+  -- La empresa de la app (BRILLOS): la única organización, o la más antigua si hubiera varias.
+  select id into v_org from public.organizations
+   order by (name ilike '%brillos%') desc, created_at limit 1;
+  if v_user is null or v_org is null then
+    raise notice 'No se encontró el usuario o la empresa BRILLOS: se omite el alta como ADMIN.';
+    return;
+  end if;
+
+  insert into public.profiles (id, org_id, full_name, email, role, active)
+  values (v_user, v_org, 'Juan José Castillo', v_email, 'ADMIN', true)
+  on conflict (id) do update set org_id = excluded.org_id, role = 'ADMIN', active = true;
+
+  delete from public.user_branches where user_id = v_user and org_id <> v_org;
+  insert into public.user_branches (org_id, user_id, branch_id)
+  select v_org, v_user, b.id from public.branches b
+   where b.org_id = v_org and b.active
+     and not exists (select 1 from public.user_branches ub where ub.user_id = v_user and ub.branch_id = b.id);
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- 4b. Se elimina la empresa vacía "Casbernet" (pedido del 2026-11-03).
+--     Solo si no tiene usuarios ni datos de negocio; si los tiene, no se borra.
+-- ---------------------------------------------------------------------
+do $$
+declare
+  v_org    uuid;
+  v_tables text[];
+  v_left   text[];
+  v_pass   integer := 0;
+  t        text;
+  n        bigint;
+begin
+  select id into v_org from public.organizations where name ilike 'casbernet%';
+  if v_org is null then
+    raise notice 'No existe la empresa Casbernet.';
+    return;
+  end if;
+
+  foreach t in array array['profiles', 'customers', 'quotations', 'orders', 'payments'] loop
+    execute format('select count(*) from public.%I where org_id = $1', t) into n using v_org;
+    if n > 0 then
+      raise notice 'Casbernet tiene % fila(s) en %: no se borra.', n, t;
+      return;
+    end if;
+  end loop;
+
+  -- Tablas con org_id (catálogos sembrados, correlativos, sucursales, etc.)
+  select array_agg(c.table_name::text) into v_tables
+    from information_schema.columns c
+    join information_schema.tables tb on tb.table_schema = c.table_schema and tb.table_name = c.table_name
+   where c.table_schema = 'public' and c.column_name = 'org_id' and tb.table_type = 'BASE TABLE';
+
+  -- Varias pasadas: el orden entre tablas depende de sus propias FK.
+  loop
+    v_pass := v_pass + 1;
+    v_left := array[]::text[];
+    foreach t in array v_tables loop
+      begin
+        execute format('delete from public.%I where org_id = $1', t) using v_org;
+      exception when foreign_key_violation or raise_exception then
+        v_left := v_left || t;
+      end;
+    end loop;
+    exit when cardinality(v_left) = 0 or v_pass >= 10;
+    v_tables := v_left;
+  end loop;
+
+  if cardinality(v_left) > 0 then
+    raise exception 'No se pudo vaciar Casbernet; quedan datos en: %', array_to_string(v_left, ', ');
+  end if;
+
+  delete from public.organizations where id = v_org;
+  raise notice 'Empresa Casbernet eliminada.';
+end;
+$$;
+
+-- ---------------------------------------------------------------------
+-- 5. Objetos de la plataforma SaaS (primero las tablas: sus políticas usan las funciones)
+-- ---------------------------------------------------------------------
+drop table if exists public.subscription_payments;
+drop table if exists public.access_requests;
+drop table if exists public.subscriptions;
+drop table if exists public.plans;
+drop table if exists public.platform_admins;
+
+do $$
+declare
+  r record;
+begin
+  -- Algunas firmas cambiaron entre migraciones: se borran todas las sobrecargas.
+  for r in
+    select p.oid::regprocedure as sig
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'public'
+       and p.proname in (
+         'platform_register_payment', 'platform_update_subscription', 'platform_approve_request',
+         'platform_reject_request', 'platform_invite_admin', 'platform_organizations', 'platform_overview',
+         'submit_access_request', 'my_subscription', 'subscription_reminders_due',
+         'create_org_subscription', 'enforce_org_writable', 'enforce_seat_limit', 'access_requests_throttle',
+         'org_can_write', 'org_access_state', 'org_seat_limit', 'org_seats_used', 'org_branch_limit',
+         'assert_platform_admin', 'check_platform_admin', 'is_platform_admin', 'platform_owner_email')
+  loop
+    execute format('drop function %s', r.sig);
+  end loop;
+end;
+$$;
+
+
+-- Recordatorios de vencimiento, si se programaron con pg_cron
+do $$
+begin
+  if exists (select 1 from pg_namespace where nspname = 'cron') then
+    perform cron.unschedule(jobid) from cron.job
+     where jobname ilike '%subscription%' or command ilike '%subscription-reminders%';
+  end if;
+end;
+$$;
+
+-- >>> 0023_bucket_ayuda.sql
+-- =====================================================================
+-- 0023 · Bucket público "ayuda": videos tutoriales de cada opción del menú
+-- Rutas: videos/{modulo}.mp4 (p. ej. videos/customers.mp4)
+-- Lectura pública (el reproductor de la ayuda usa la URL pública);
+-- solo ADMIN sube, reemplaza o borra.
+-- =====================================================================
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('ayuda', 'ayuda', true, 52428800, array['video/mp4'])
+on conflict (id) do update
+  set public = excluded.public,
+      file_size_limit = excluded.file_size_limit,
+      allowed_mime_types = excluded.allowed_mime_types;
+
+drop policy if exists "ayuda_insert_admin" on storage.objects;
+create policy "ayuda_insert_admin" on storage.objects
+  for insert to authenticated
+  with check (bucket_id = 'ayuda' and public.has_role('ADMIN'));
+
+drop policy if exists "ayuda_update_admin" on storage.objects;
+create policy "ayuda_update_admin" on storage.objects
+  for update to authenticated
+  using (bucket_id = 'ayuda' and public.has_role('ADMIN'))
+  with check (bucket_id = 'ayuda' and public.has_role('ADMIN'));
+
+drop policy if exists "ayuda_delete_admin" on storage.objects;
+create policy "ayuda_delete_admin" on storage.objects
+  for delete to authenticated
+  using (bucket_id = 'ayuda' and public.has_role('ADMIN'));
+
+-- Upsert de supabase-js necesita poder leer el objeto existente
+drop policy if exists "ayuda_select_admin" on storage.objects;
+create policy "ayuda_select_admin" on storage.objects
+  for select to authenticated
+  using (bucket_id = 'ayuda' and public.has_role('ADMIN'));
