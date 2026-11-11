@@ -39,6 +39,9 @@ import {
   gemSummary,
 } from '../../services/inventory.service';
 
+const qty = (x: { quantity?: number | null }): number => Number(x.quantity ?? 0);
+const units = (rows: { quantity?: number | null }[]): number => rows.reduce((a, r) => a + qty(r), 0);
+
 /** Vitrina: joyas terminadas en stock y piedras registradas (diamantes con las 4C). Se venden desde un pedido de tipo Venta. */
 @Component({
   selector: 'app-inventory',
@@ -117,11 +120,14 @@ import {
                       <span class="small muted"><i class="pi pi-sparkles"></i> {{ g.gem ? summary(g.gem) : g.quantity + ' ' + g.description + (g.total_carat ? ' (' + g.total_carat + ' ct)' : '') }}</span>
                     }
                     <div class="row row--between piece__foot">
-                      <strong class="mono">{{ p.price | money: p.currency }}</strong>
+                      <span>
+                        <strong class="mono">{{ p.price | money: p.currency }}</strong>
+                        <span class="small" [class.muted]="!p.quantity"> · {{ p.quantity }} und.</span>
+                      </span>
                       @if (canWrite) {
                         <span>
                           <p-button icon="pi pi-pencil" [text]="true" size="small" severity="secondary" ariaLabel="Editar" (onClick)="openProduct(p)" />
-                          @if (p.status === 'STOCK' || p.status === 'BAJA') {
+                          @if (p.status === 'STOCK' || (p.status === 'BAJA' && p.quantity > 0)) {
                             <p-button
                               [icon]="p.status === 'STOCK' ? 'pi pi-ban' : 'pi pi-replay'"
                               [text]="true"
@@ -164,6 +170,7 @@ import {
                   <th>Medidas (mm)</th>
                   <th>Certificado</th>
                   <th>Estado</th>
+                  <th pSortableColumn="quantity" class="text-right">Cant. <p-sortIcon field="quantity" /></th>
                   <th class="text-right">Precio</th>
                   <th></th>
                 </tr>
@@ -192,11 +199,12 @@ import {
                       <br /><a class="small" [routerLink]="['/orders', g.order.id]">{{ g.order.number }}</a>
                     }
                   </td>
+                  <td class="text-right mono">{{ g.quantity }}</td>
                   <td class="text-right mono nowrap">{{ g.price | money: g.currency }}</td>
                   <td class="text-right nowrap">
                     @if (canWrite) {
                       <p-button icon="pi pi-pencil" [text]="true" severity="secondary" ariaLabel="Editar" (onClick)="openGem(g)" />
-                      @if (g.status === 'STOCK' || g.status === 'BAJA') {
+                      @if (g.status === 'STOCK' || (g.status === 'BAJA' && g.quantity > 0)) {
                         <p-button
                           [icon]="g.status === 'STOCK' ? 'pi pi-ban' : 'pi pi-replay'"
                           [text]="true"
@@ -210,7 +218,7 @@ import {
                 </tr>
               </ng-template>
               <ng-template #emptymessage>
-                <tr><td colspan="11"><app-empty-state icon="pi pi-sparkles" message="No hay piedras registradas con esos filtros." /></td></tr>
+                <tr><td colspan="12"><app-empty-state icon="pi pi-sparkles" message="No hay piedras registradas con esos filtros." /></td></tr>
               </ng-template>
             </p-table>
           </p-tabpanel>
@@ -312,16 +320,16 @@ export class Inventory implements OnInit {
   protected readonly editingGem = signal<Gem | null>(null);
 
   protected readonly stockGems = computed(() => this.gems().filter((g) => g.status === 'STOCK'));
-  protected readonly stockCount = computed(() => String(this.products().filter((p) => p.status === 'STOCK').length));
+  protected readonly stockCount = computed(() => String(units(this.products().filter((p) => p.status === 'STOCK'))));
   protected readonly reservedCount = computed(
     () => String(this.products().filter((p) => p.status === 'RESERVADO').length + this.gems().filter((g) => g.status === 'RESERVADA').length),
   );
-  protected readonly gemStockCount = computed(() => String(this.stockGems().length));
-  protected readonly gemCarats = computed(() => `${this.stockGems().reduce((a, g) => a + Number(g.carat), 0).toFixed(2)} ct en total`);
+  protected readonly gemStockCount = computed(() => String(units(this.stockGems())));
+  protected readonly gemCarats = computed(() => `${this.stockGems().reduce((a, g) => a + Number(g.carat) * qty(g), 0).toFixed(2)} ct en total`);
   protected readonly stockValue = computed(() => {
     const stock = this.products().filter((p) => p.status === 'STOCK');
-    const pen = stock.filter((p) => p.currency === 'PEN').reduce((a, p) => a + Number(p.price), 0);
-    const usd = stock.filter((p) => p.currency === 'USD').reduce((a, p) => a + Number(p.price), 0);
+    const pen = stock.filter((p) => p.currency === 'PEN').reduce((a, p) => a + Number(p.price) * qty(p), 0);
+    const usd = stock.filter((p) => p.currency === 'USD').reduce((a, p) => a + Number(p.price) * qty(p), 0);
     return usd ? `${formatMoney(pen)} · ${formatMoney(usd, 'USD')}` : formatMoney(pen);
   });
 

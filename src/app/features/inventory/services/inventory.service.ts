@@ -96,6 +96,8 @@ export interface Product {
   price: number;
   currency: Currency;
   photo_path: string | null;
+  /** Unidades disponibles en vitrina (sin contar las reservadas o vendidas). */
+  quantity: number;
   status: PieceStatus;
   order_id: string | null;
   sold_at: string | null;
@@ -108,7 +110,7 @@ export interface Product {
 
 export type ProductInput = Pick<
   Product,
-  'code' | 'name' | 'category' | 'material_id' | 'metal' | 'metal_color' | 'weight_g' | 'size' | 'description' | 'cost' | 'price' | 'currency' | 'notes'
+  'code' | 'name' | 'category' | 'material_id' | 'metal' | 'metal_color' | 'weight_g' | 'size' | 'description' | 'cost' | 'price' | 'currency' | 'quantity' | 'notes'
 >;
 
 // ---------------------------------------------------------------- Piedras (escala GIA)
@@ -219,6 +221,8 @@ export interface Gem {
   price: number;
   currency: Currency;
   photo_path: string | null;
+  /** Unidades disponibles (una piedra con certificado es única). */
+  quantity: number;
   status: PieceStatus;
   product_id: string | null;
   order_id: string | null;

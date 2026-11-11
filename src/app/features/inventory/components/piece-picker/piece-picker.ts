@@ -55,12 +55,13 @@ import { Gem, InventoryService, PRODUCT_CATEGORY_LABELS, Product, gemSummary } f
                     <strong>{{ p.name }}</strong>
                     <br /><span class="small muted mono">{{ p.code }}</span> <span class="small muted">· {{ $any(categoryLabels)[p.category] }} {{ p.metal ?? '' }}</span>
                   </td>
+                  <td class="text-right small nowrap">{{ p.quantity }} disp.</td>
                   <td class="text-right mono nowrap">{{ p.price | money: p.currency }}</td>
                   <td class="text-right"><p-button label="Agregar" size="small" icon="pi pi-plus" (onClick)="pickProduct(p)" /></td>
                 </tr>
               </ng-template>
               <ng-template #emptymessage>
-                <tr><td colspan="4"><app-empty-state icon="pi pi-star" message="No hay joyas disponibles en vitrina." /></td></tr>
+                <tr><td colspan="5"><app-empty-state icon="pi pi-star" message="No hay joyas disponibles en vitrina." /></td></tr>
               </ng-template>
             </p-table>
           </p-tabpanel>
@@ -72,12 +73,13 @@ import { Gem, InventoryService, PRODUCT_CATEGORY_LABELS, Product, gemSummary } f
                     <strong>{{ summary(g) }}</strong>
                     <br /><span class="small muted mono">{{ g.code }}{{ g.lab ? ' · ' + g.lab + ' ' + (g.certificate_number ?? '') : '' }}</span>
                   </td>
+                  <td class="text-right small nowrap">{{ g.quantity }} disp.</td>
                   <td class="text-right mono nowrap">{{ g.price | money: g.currency }}</td>
                   <td class="text-right"><p-button label="Agregar" size="small" icon="pi pi-plus" (onClick)="pickGem(g)" /></td>
                 </tr>
               </ng-template>
               <ng-template #emptymessage>
-                <tr><td colspan="3"><app-empty-state icon="pi pi-sparkles" message="No hay piedras sueltas disponibles." /></td></tr>
+                <tr><td colspan="4"><app-empty-state icon="pi pi-sparkles" message="No hay piedras sueltas disponibles." /></td></tr>
               </ng-template>
             </p-table>
           </p-tabpanel>

@@ -74,6 +74,16 @@ import {
             <app-field-error [control]="form.controls.price" />
           </div>
           <div class="field">
+            <label for="pr-qty">Cantidad <span class="req">*</span></label>
+            <p-inputnumber inputId="pr-qty" formControlName="quantity" [min]="product() ? 0 : 1" [max]="hasRegisteredGems() ? 1 : null" [useGrouping]="false" suffix=" und." [fluid]="true" />
+            @if (hasRegisteredGems()) {
+              <small class="muted">Con piedras registradas la joya es única.</small>
+            } @else if (product()) {
+              <small class="muted">Unidades disponibles (sin las reservadas o vendidas).</small>
+            }
+            <app-field-error [control]="form.controls.quantity" />
+          </div>
+          <div class="field">
             <label for="pr-photo">Foto</label>
             <input id="pr-photo" type="file" accept="image/jpeg,image/png,image/webp" (change)="onFile($event)" />
           </div>
@@ -176,7 +186,13 @@ export class ProductDialog {
     cost: [0 as number | null],
     price: [null as number | null, Validators.required],
     currency: ['PEN' as Currency],
+    quantity: [1 as number | null, [Validators.required, Validators.min(0)]],
   });
+
+  /** Una joya con piedras registradas montadas es única (cantidad 1). */
+  protected hasRegisteredGems(): boolean {
+    return this.stones.some((s) => !!s.gem_id);
+  }
 
   constructor() {
     effect(() => {
@@ -199,8 +215,9 @@ export class ProductDialog {
                 cost: Number(p.cost),
                 price: Number(p.price),
                 currency: p.currency,
+                quantity: p.quantity ?? 1,
               }
-            : { code: '', name: '', category: 'ANILLO', cost: 0, price: null, currency: 'PEN', size: '', description: '' },
+            : { code: '', name: '', category: 'ANILLO', cost: 0, price: null, currency: 'PEN', quantity: 1, size: '', description: '' },
         );
       });
     });
@@ -221,6 +238,15 @@ export class ProductDialog {
     }
     const stones = this.stones.filter((s) => s.gem_id || s.description?.trim());
     const v = this.form.getRawValue();
+    const quantity = Math.trunc(Number(v.quantity ?? 0));
+    if (!this.product() && quantity < 1) {
+      this.notify.warn('Indique al menos 1 unidad.');
+      return;
+    }
+    if (quantity > 1 && stones.some((s) => s.gem_id)) {
+      this.notify.warn('Una joya con piedras registradas es única: la cantidad debe ser 1.');
+      return;
+    }
     const material = this.materials().find((m) => m.id === v.material_id);
     this.saving.set(true);
     try {
@@ -239,6 +265,7 @@ export class ProductDialog {
           cost: Number(v.cost ?? 0),
           price: Number(v.price ?? 0),
           currency: v.currency!,
+          quantity,
           notes: null,
         },
         stones,

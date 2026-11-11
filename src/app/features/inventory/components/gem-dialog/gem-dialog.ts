@@ -130,8 +130,16 @@ import {
           }
         </div>
 
-        <h3 class="section-title">Precio</h3>
-        <div class="form-grid form-grid--3">
+        <h3 class="section-title">Cantidad y precio</h3>
+        <div class="form-grid form-grid--4">
+          <div class="field">
+            <label for="gm-qty">Cantidad <span class="req">*</span></label>
+            <p-inputnumber inputId="gm-qty" formControlName="quantity" [min]="gem() ? 0 : 1" [max]="hasCertificate() ? 1 : null" [useGrouping]="false" suffix=" und." [fluid]="true" />
+            @if (hasCertificate()) {
+              <small class="muted">Con certificado la piedra es única.</small>
+            }
+            <app-field-error [control]="form.controls.quantity" />
+          </div>
           <div class="field">
             <label for="gm-cur">Moneda</label>
             <p-select inputId="gm-cur" [options]="currencies" formControlName="currency" optionLabel="label" optionValue="value" appendTo="body" />
@@ -214,7 +222,13 @@ export class GemDialog {
     price: [0 as number | null],
     currency: ['USD' as Currency],
     notes: [''],
+    quantity: [1 as number | null, [Validators.required, Validators.min(0)]],
   });
+
+  /** Una piedra con certificado es única (cantidad 1). */
+  protected hasCertificate(): boolean {
+    return !!this.form.controls.certificate_number.value?.trim();
+  }
 
   protected isDiamond(): boolean {
     return this.form.controls.gem_type.value === 'DIAMANTE';
@@ -238,8 +252,9 @@ export class GemDialog {
                 depth_mm: g.depth_mm != null ? Number(g.depth_mm) : null,
                 certificate_number: g.certificate_number ?? '',
                 notes: g.notes ?? '',
+                quantity: g.quantity ?? 1,
               }
-            : { gem_type: 'DIAMANTE', shape: 'REDONDO', origin: 'EMPRESA', currency: 'USD', cost: 0, price: 0, code: '', certificate_number: '', notes: '' },
+            : { gem_type: 'DIAMANTE', shape: 'REDONDO', origin: 'EMPRESA', currency: 'USD', cost: 0, price: 0, quantity: 1, code: '', certificate_number: '', notes: '' },
         );
       });
     });
@@ -257,6 +272,15 @@ export class GemDialog {
       return;
     }
     const v = this.form.getRawValue();
+    const quantity = Math.trunc(Number(v.quantity ?? 0));
+    if (!this.gem() && quantity < 1) {
+      this.notify.warn('Indique al menos 1 unidad.');
+      return;
+    }
+    if (quantity > 1 && v.certificate_number?.trim()) {
+      this.notify.warn('Una piedra con certificado es única: la cantidad debe ser 1.');
+      return;
+    }
     if (v.origin === 'CLIENTE' && !v.customer_id) {
       this.notify.warn('Seleccione el cliente dueño de la piedra.');
       return;
@@ -284,6 +308,7 @@ export class GemDialog {
         cost: Number(v.cost ?? 0),
         price: Number(v.price ?? 0),
         currency: v.currency!,
+        quantity,
         notes: v.notes?.trim() || null,
       });
       if (this.file) await this.service.uploadPhoto('gems', id, this.file, this.gem()?.photo_path ?? null);

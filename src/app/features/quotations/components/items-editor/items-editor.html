@@ -19,7 +19,7 @@
         <input pInputText formControlName="detail" placeholder="Descripción / detalle (opcional)" class="items__detail" />
         <app-field-error [control]="group.controls.description" />
         @if (group.controls.product_id.value || group.controls.gem_id.value) {
-          <span class="small text-warn"><i class="pi pi-star"></i> Pieza de vitrina: se reserva al guardar el pedido.</span>
+          <span class="small text-warn"><i class="pi pi-star"></i> Pieza de vitrina: las unidades se reservan al guardar el pedido.</span>
         }
       </div>
       <div class="items__cell">
@@ -50,7 +50,7 @@
       </div>
       <div class="items__cell">
         <label class="items__label">Cantidad</label>
-        <p-inputnumber formControlName="quantity" [readonly]="!!(group.controls.product_id.value || group.controls.gem_id.value)" [minFractionDigits]="0" [maxFractionDigits]="3" [min]="0" inputStyleClass="text-right" [fluid]="true" locale="es-PE" />
+        <p-inputnumber formControlName="quantity" [minFractionDigits]="0" [maxFractionDigits]="group.controls.product_id.value || group.controls.gem_id.value ? 0 : 3" [min]="0" inputStyleClass="text-right" [fluid]="true" locale="es-PE" />
         <app-field-error [control]="group.controls.quantity" />
       </div>
       <div class="items__cell">
