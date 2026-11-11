@@ -11,10 +11,12 @@ import { TextareaModule } from 'primeng/textarea';
 import { CheckboxModule } from 'primeng/checkbox';
 import { MessageModule } from 'primeng/message';
 import { ConfirmationService } from 'primeng/api';
-import { Currency, PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
+import { CURRENCY_OPTIONS, Currency, PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
+import { AuthService } from '../../../../core/auth/auth.service';
+import { RouterLink } from '@angular/router';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { BankAccountsService } from '../../../../core/services/bank-accounts.service';
-import { accountLabel, compatibleAccounts, suggestedAccount } from '../../../../core/models/bank.model';
+import { accountLabel, compatibleAccounts, methodUsesAccount, missingAccountHint, suggestedAccount } from '../../../../core/models/bank.model';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { MoneyPipe, formatMoney } from '../../../../shared/pipes/money.pipe';
 import { endOfToday, toIsoDate } from '../../../../shared/utils/db';
@@ -23,6 +25,8 @@ import { Order, OrderRow } from '../../../orders/models/order.model';
 import { OrderPicker } from '../../../orders/components/order-picker/order-picker';
 import { OrdersService } from '../../../orders/services/orders.service';
 import { CustomerCreditsService } from '../../../customers/services/customer-credits.service';
+import { CustomersService } from '../../../customers/services/customers.service';
+import { CustomerPicker } from '../../../customers/components/customer-picker/customer-picker';
 import { PaymentsService } from '../../services/payments.service';
 import { ReceiptPdfService } from '../../services/receipt-pdf.service';
 
@@ -33,6 +37,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
 /**
  * Registro de pagos y adelantos. Si el monto supera el saldo, el sobrante pasa solo al saldo a favor del
  * cliente. Con el método "Saldo a favor" se usa el dinero que el cliente dejó a cuenta.
+ * Un adelanto puede registrarse sin pedido (aún no existe): queda como depósito en el saldo a favor del
+ * cliente y se aplica al pedido cuando se cree.
  */
 @Component({
   selector: 'app-payment-dialog',
@@ -50,6 +56,8 @@ const round2 = (n: number) => Math.round(n * 100) / 100;
     FieldError,
     MoneyPipe,
     OrderPicker,
+    CustomerPicker,
+    RouterLink,
   ],
   templateUrl: './payment-dialog.html',
 })
@@ -61,6 +69,9 @@ export class PaymentDialog {
   private readonly confirm = inject(ConfirmationService);
   private readonly receipts = inject(ReceiptPdfService);
   private readonly bankAccounts = inject(BankAccountsService);
+  private readonly customers = inject(CustomersService);
+  protected readonly canConfigure = inject(AuthService).hasRole('ADMIN');
+  protected readonly currencies = CURRENCY_OPTIONS;
 
   readonly visible = model(false);
   /** Pedido fijo (desde la ficha del pedido). */
@@ -84,13 +95,24 @@ export class PaymentDialog {
     received_from: ['', Validators.maxLength(150)],
     /** Cuenta donde entra el dinero (obligatoria si hay cuentas para el método y la moneda). */
     bank_account_id: [null as string | null],
+    /** Solo para un adelanto sin pedido. */
+    customer_id: [null as string | null],
+    currency: ['PEN' as Currency],
   });
 
-  private readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
-  /** Cuentas que sirven para el método y la moneda del pedido (el saldo a favor no entra a ninguna). */
+  protected readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
+  private readonly isAdvance = toSignal(this.form.controls.is_advance.valueChanges, { initialValue: false as boolean | null });
+  private readonly orderValue = toSignal(this.form.controls.order_id.valueChanges, { initialValue: null as string | null });
+  private readonly currencyValue = toSignal(this.form.controls.currency.valueChanges, { initialValue: 'PEN' as Currency | null });
+  /** Adelanto de un pedido que aún no existe: se registra como depósito a cuenta del cliente. */
+  protected readonly noOrder = computed(() => !this.orderId() && !!this.isAdvance() && !this.orderValue());
+
+  /** Cuentas que sirven para el método y la moneda (el saldo a favor no entra a ninguna). */
   protected readonly accountOptions = computed(() =>
     compatibleAccounts(this.bankAccounts.accounts(), this.method(), this.currency()),
   );
+  protected readonly needsAccount = computed(() => methodUsesAccount(this.method()));
+  protected readonly accountHint = computed(() => missingAccountHint(this.method(), this.currency()));
   protected readonly accountLabel = accountLabel;
   private readonly amount = toSignal(this.form.controls.amount.valueChanges, { initialValue: this.form.controls.amount.value });
 
@@ -113,11 +135,24 @@ export class PaymentDialog {
       : PAYMENT_METHOD_OPTIONS,
   );
 
+  /** Moneda del pedido; sin pedido, la que se elige. */
   protected currency(): Currency {
-    return this.order()?.currency ?? 'PEN';
+    return this.order()?.currency ?? (this.noOrder() ? (this.currencyValue() ?? 'PEN') : 'PEN');
   }
 
   constructor() {
+    // Pedido obligatorio salvo en un adelanto sin pedido; en ese caso se exige el cliente
+    effect(() => {
+      const advance = !!this.isAdvance();
+      const noOrder = this.noOrder();
+      untracked(() => {
+        const c = this.form.controls;
+        c.order_id.setValidators(advance && !this.orderId() ? [] : [Validators.required]);
+        c.customer_id.setValidators(noOrder ? [Validators.required] : []);
+        c.order_id.updateValueAndValidity({ emitEvent: false });
+        c.customer_id.updateValueAndValidity({ emitEvent: false });
+      });
+    });
     // Propone la cuenta (única o principal) y la exige cuando hay opciones
     effect(() => {
       const options = this.accountOptions();
@@ -143,6 +178,8 @@ export class PaymentDialog {
           is_advance: false,
           received_from: '',
           bank_account_id: null,
+          customer_id: null,
+          currency: 'PEN',
         });
         this.order.set(null);
         void this.bankAccounts.ensureLoaded().catch((err) => this.notify.error(err, 'No se pudieron cargar las cuentas.'));
@@ -203,7 +240,58 @@ export class PaymentDialog {
       this.notify.warn('El pedido no tiene saldo pendiente. Registre el dinero como depósito en la ficha del cliente (pestaña Saldo a favor).');
       return;
     }
-    await this.persist();
+    if (this.noOrder()) await this.persistAdvanceWithoutOrder();
+    else await this.persist();
+  }
+
+  /** Adelanto sin pedido = depósito en el saldo a favor del cliente (recibo de ingreso RI). */
+  private async persistAdvanceWithoutOrder(): Promise<void> {
+    const v = this.form.getRawValue();
+    const customerId = v.customer_id!;
+    const currency = this.currency();
+    const amount = Number(v.amount);
+    this.saving.set(true);
+    try {
+      const r = await this.credits.deposit(customerId, {
+        amount,
+        currency,
+        method: v.method!,
+        movement_date: toIsoDate(v.payment_date)!,
+        reference: v.reference?.trim() || null,
+        notes: v.notes?.trim() || 'Adelanto sin pedido',
+        received_from: v.received_from?.trim() || null,
+        bank_account_id: v.bank_account_id || null,
+      });
+      this.notify.success(
+        `Adelanto registrado (${r.receipt_number}). ${formatMoney(amount, currency)} quedan a favor del cliente; al crear el pedido, aplíquelo con el método «Saldo a favor».`,
+      );
+      this.visible.set(false);
+      this.saved.emit();
+      this.offerDepositReceipt(customerId, r.id);
+    } catch (err) {
+      this.notify.error(err, 'No se pudo registrar el adelanto.');
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  private offerDepositReceipt(customerId: string, creditId: string): void {
+    this.confirm.confirm({
+      header: 'Recibo de ingreso',
+      message: '¿Desea imprimir el recibo de ingreso de este adelanto?',
+      icon: 'pi pi-print',
+      acceptButtonProps: { label: 'Imprimir recibo', icon: 'pi pi-print' },
+      rejectButtonProps: { label: 'Ahora no', severity: 'secondary', text: true },
+      accept: async () => {
+        try {
+          const [movements, customer] = await Promise.all([this.credits.list(customerId), this.customers.get(customerId)]);
+          const c = movements.find((m) => m.id === creditId);
+          if (c) await this.receipts.credit(c, customer);
+        } catch (err) {
+          this.notify.error(err, 'No se pudo generar el recibo.');
+        }
+      },
+    });
   }
 
   private async persist(): Promise<void> {

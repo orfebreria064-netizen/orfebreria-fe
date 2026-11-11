@@ -102,10 +102,31 @@ export function suggestedAccount(options: BankAccount[]): string | null {
   return options.find((a) => a.is_default)?.id ?? null;
 }
 
-/** Texto corto para listas: "BCP · Ahorros soles ••••1234". */
+/** Texto para selectores: "BCP · Cuenta empresa ••••1234 · S/" (el banco no se repite si ya está en el nombre). */
 export function accountLabel(a: BankAccount): string {
   const tail = a.account_number ?? a.phone;
-  return [a.alias, tail ? `••••${tail.slice(-4)}` : null].filter(Boolean).join(' ');
+  const bank = a.bank?.short_name;
+  const withBank = bank && !a.alias.toLowerCase().includes(bank.toLowerCase()) ? `${bank} · ${a.alias}` : a.alias;
+  return [withBank + (tail ? ` ••••${tail.slice(-4)}` : ''), a.currency === 'USD' ? 'US$' : 'S/'].join(' · ');
+}
+
+/** ¿El método mueve dinero por una cuenta? (el saldo a favor no). */
+export function methodUsesAccount(method: PaymentMethod | null | undefined): boolean {
+  return !!method && method !== 'SALDO_A_FAVOR';
+}
+
+/** Qué tipo de cuenta falta registrar para un método (para el aviso cuando no hay opciones). */
+export function missingAccountHint(method: PaymentMethod | null | undefined, currency: Currency | string): string {
+  const cur = currency === 'USD' ? 'dólares' : 'soles';
+  switch (method) {
+    case 'EFECTIVO':
+      return `No hay una caja en ${cur} activa.`;
+    case 'YAPE':
+    case 'PLIN':
+      return `No hay una billetera ${method === 'YAPE' ? 'Yape' : 'Plin'} activa${currency === 'USD' ? ' (solo operan en soles)' : ''}.`;
+    default:
+      return `No hay cuentas bancarias en ${cur} activas.`;
+  }
 }
 
 export const onlyDigits = (v: unknown): string => String(v ?? '').replace(/\D/g, '');

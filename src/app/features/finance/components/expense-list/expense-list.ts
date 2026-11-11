@@ -15,7 +15,10 @@ import { TextareaModule } from 'primeng/textarea';
 import { CURRENCY_OPTIONS, Currency, PAYMENT_METHOD_LABELS, PAYMENT_METHOD_OPTIONS, PaymentMethod } from '../../../../core/models/domain';
 import { NotifyService } from '../../../../core/services/notify.service';
 import { BankAccountsService } from '../../../../core/services/bank-accounts.service';
-import { accountAcceptsMethod, accountLabel, compatibleAccounts, suggestedAccount } from '../../../../core/models/bank.model';
+import { accountAcceptsMethod, accountLabel, compatibleAccounts, missingAccountHint, suggestedAccount } from '../../../../core/models/bank.model';
+import { AuthService } from '../../../../core/auth/auth.service';
+import { RouterLink } from '@angular/router';
+import { MessageModule } from 'primeng/message';
 import { EmptyState } from '../../../../shared/components/empty-state/empty-state';
 import { FieldError } from '../../../../shared/components/field-error/field-error';
 import { LabelPipe } from '../../../../shared/pipes/label.pipe';
@@ -45,6 +48,8 @@ import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCate
     FieldError,
     LabelPipe,
     MoneyPipe,
+    MessageModule,
+    RouterLink,
   ],
   template: `
     <div class="toolbar-filters">
@@ -120,16 +125,26 @@ import { EXPENSE_CATEGORY_LABELS, EXPENSE_CATEGORY_OPTIONS, Expense, ExpenseCate
           <label for="ex-method">Método de pago <span class="req">*</span></label>
           <p-select inputId="ex-method" [options]="methods" formControlName="method" optionLabel="label" optionValue="value" appendTo="body" />
         </div>
-        @if (accountOptions().length) {
-          <div class="field">
-            <label for="ex-account">Cuenta de origen <span class="req">*</span></label>
+        <div class="field">
+          <label for="ex-account">
+            {{ method() === 'EFECTIVO' ? 'Caja' : 'Banco / cuenta de origen' }} ({{ currency() === 'USD' ? 'US$' : 'S/' }})
+            @if (accountOptions().length) {<span class="req">*</span>}
+          </label>
+          @if (accountOptions().length) {
             <p-select inputId="ex-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id" placeholder="¿De qué cuenta salió?" appendTo="body">
               <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
               <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
             </p-select>
             <app-field-error [control]="form.controls.bank_account_id" />
-          </div>
-        }
+          } @else {
+            <p-message severity="warn" size="small" icon="pi pi-exclamation-triangle">
+              {{ accountHint() }} El gasto quedará sin cuenta.
+              @if (canConfigure) {
+                <a routerLink="/settings" [queryParams]="{ tab: 'banks' }" (click)="dialogVisible = false">Registrar cuenta</a>
+              }
+            </p-message>
+          }
+        </div>
         <div class="field">
           <label for="ex-sup">Proveedor / pagado a</label>
           <input pInputText id="ex-sup" formControlName="supplier" />
@@ -224,8 +239,8 @@ export class ExpenseList implements OnInit {
     notes: [''],
   });
 
-  private readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
-  private readonly currency = toSignal(this.form.controls.currency.valueChanges, { initialValue: this.form.controls.currency.value });
+  protected readonly method = toSignal(this.form.controls.method.valueChanges, { initialValue: this.form.controls.method.value });
+  protected readonly currency = toSignal(this.form.controls.currency.valueChanges, { initialValue: this.form.controls.currency.value });
   /** Cuentas activas compatibles con el método y la moneda; al editar se conserva la ya asignada aunque esté desactivada. */
   protected readonly accountOptions = computed(() => {
     const options = compatibleAccounts(this.bankAccounts.accounts(), this.method(), this.currency() ?? 'PEN');
@@ -234,6 +249,8 @@ export class ExpenseList implements OnInit {
     return kept && kept.currency === this.currency() && accountAcceptsMethod(kept, this.method()) ? [...options, kept] : options;
   });
   protected readonly accountLabel = accountLabel;
+  protected readonly accountHint = computed(() => missingAccountHint(this.method(), this.currency() ?? 'PEN'));
+  protected readonly canConfigure = inject(AuthService).hasRole('ADMIN');
 
   constructor() {
     // Propone la cuenta (única o principal) y la exige cuando hay opciones

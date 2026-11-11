@@ -1,11 +1,37 @@
 <p-dialog header="Registrar pago" [(visible)]="visible" [modal]="true" [style]="{ width: '520px' }" [draggable]="false">
   <form [formGroup]="form" (ngSubmit)="save()" class="form-grid" novalidate>
     @if (!orderId()) {
+      <div class="field field--full row">
+        <p-checkbox inputId="pay-advance-top" formControlName="is_advance" [binary]="true" />
+        <label for="pay-advance-top">Es un adelanto</label>
+      </div>
       <div class="field field--full">
-        <label for="pay-order">Pedido <span class="req">*</span></label>
+        <label for="pay-order">
+          Pedido
+          @if (form.controls.is_advance.value) {
+            <span class="muted small">(opcional si el pedido aún no existe)</span>
+          } @else {
+            <span class="req">*</span>
+          }
+        </label>
         <app-order-picker inputId="pay-order" formControlName="order_id" (orderSelected)="setOrder($event)" />
         <app-field-error [control]="form.controls.order_id" />
       </div>
+      @if (noOrder()) {
+        <div class="field">
+          <label for="pay-customer">Cliente <span class="req">*</span></label>
+          <app-customer-picker inputId="pay-customer" formControlName="customer_id" />
+          <app-field-error [control]="form.controls.customer_id" />
+        </div>
+        <div class="field">
+          <label for="pay-currency">Moneda <span class="req">*</span></label>
+          <p-select inputId="pay-currency" [options]="currencies" formControlName="currency" optionLabel="label" optionValue="value" appendTo="body" />
+        </div>
+        <p-message class="field--full" severity="info" size="small" icon="pi pi-info-circle">
+          Sin pedido, el adelanto queda como saldo a favor del cliente (recibo de ingreso). Cuando se cree el pedido,
+          regístrelo con el método «Saldo a favor».
+        </p-message>
+      }
     }
 
     @if (order(); as o) {
@@ -46,14 +72,28 @@
         <strong style="padding-top: 0.5rem">{{ creditApplicable() | money: currency() }}</strong>
       </div>
     }
-    @if (accountOptions().length) {
+    @if (needsAccount()) {
       <div class="field field--full">
-        <label for="pay-account">Cuenta destino <span class="req">*</span></label>
-        <p-select inputId="pay-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id" placeholder="¿A qué cuenta entró el dinero?" appendTo="body">
-          <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
-          <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
-        </p-select>
-        <app-field-error [control]="form.controls.bank_account_id" />
+        <label for="pay-account">
+          {{ method() === 'EFECTIVO' ? 'Caja' : 'Banco / cuenta destino' }} ({{ currency() === 'USD' ? 'US$' : 'S/' }})
+          @if (accountOptions().length) {<span class="req">*</span>}
+        </label>
+        @if (accountOptions().length) {
+          <p-select inputId="pay-account" [options]="accountOptions()" formControlName="bank_account_id" optionValue="id" placeholder="¿A qué cuenta entró el dinero?" appendTo="body">
+            <ng-template #selectedItem let-a>{{ accountLabel(a) }}</ng-template>
+            <ng-template #item let-a>{{ accountLabel(a) }}@if (a.is_default) {<span class="muted small"> · principal</span>}</ng-template>
+          </p-select>
+          <app-field-error [control]="form.controls.bank_account_id" />
+        } @else {
+          <p-message severity="warn" size="small" icon="pi pi-exclamation-triangle">
+            {{ accountHint() }} El cobro quedará sin cuenta.
+            @if (canConfigure) {
+              <a routerLink="/settings" [queryParams]="{ tab: 'banks' }" (click)="visible.set(false)">Registrar cuenta</a>
+            } @else {
+              Pida al administrador que la registre.
+            }
+          </p-message>
+        }
       </div>
     }
     @if (excess() > 0) {
@@ -65,10 +105,12 @@
       <label for="pay-from">Entregado por</label>
       <input pInputText id="pay-from" formControlName="received_from" placeholder="Déjelo vacío si paga el mismo cliente" />
     </div>
-    <div class="field field--full row">
-      <p-checkbox inputId="pay-advance" formControlName="is_advance" [binary]="true" />
-      <label for="pay-advance">Es un adelanto</label>
-    </div>
+    @if (orderId()) {
+      <div class="field field--full row">
+        <p-checkbox inputId="pay-advance" formControlName="is_advance" [binary]="true" />
+        <label for="pay-advance">Es un adelanto</label>
+      </div>
+    }
     <div class="field field--full">
       <label for="pay-notes">Observaciones</label>
       <textarea pTextarea id="pay-notes" formControlName="notes" rows="2" [autoResize]="true"></textarea>
