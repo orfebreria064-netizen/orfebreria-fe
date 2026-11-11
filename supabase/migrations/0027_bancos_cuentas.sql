@@ -93,6 +93,12 @@ create unique index bank_accounts_default_uidx on public.bank_accounts (org_id, 
 create trigger bank_accounts_updated_at before update on public.bank_accounts
   for each row execute function public.set_updated_at();
 
+-- Cuenta en cobros y gastos (antes de las funciones que la consultan)
+alter table public.payments add column bank_account_id uuid references public.bank_accounts (id);
+alter table public.expenses add column bank_account_id uuid references public.bank_accounts (id);
+create index payments_bank_account_idx on public.payments (bank_account_id, payment_date) where bank_account_id is not null;
+create index expenses_bank_account_idx on public.expenses (bank_account_id, expense_date) where bank_account_id is not null;
+
 -- Cajas de efectivo iniciales (principales) para la empresa
 insert into public.bank_accounts (org_id, account_type, currency, alias, is_default, created_by)
 select o.id, 'CAJA', c.currency, c.alias, true, null
@@ -383,10 +389,6 @@ $$;
 -- ---------------------------------------------------------------------
 -- Cuenta en cobros y gastos
 -- ---------------------------------------------------------------------
-alter table public.payments add column bank_account_id uuid references public.bank_accounts (id);
-alter table public.expenses add column bank_account_id uuid references public.bank_accounts (id);
-create index payments_bank_account_idx on public.payments (bank_account_id, payment_date) where bank_account_id is not null;
-create index expenses_bank_account_idx on public.expenses (bank_account_id, expense_date) where bank_account_id is not null;
 
 -- Valida (o asigna) la cuenta de un cobro o un gasto. Corre después de los demás triggers
 -- "before" (orden alfabético: ..._zz_...), cuando payments.currency ya tomó la moneda del pedido.
